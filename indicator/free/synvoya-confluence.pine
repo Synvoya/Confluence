@@ -271,6 +271,9 @@ dashPosition  = input.string("Top Right", "Table Position",
      options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=G_DASH, display=display.none)
 dashSize      = input.string("Small", "Table Size",
      options=["Tiny", "Small", "Normal"], group=G_DASH, display=display.none)
+biasMethod    = input.string("Structure (SMC)", "Bias Method",
+     options=["Structure (SMC)", "Momentum (responsive)"], group=G_DASH,
+     tooltip="Structure (default): pivot-based BOS detection — same logic as the chart's market structure. Sticky; flips only on a real structural break. SMC-pure.\n\nMomentum: close vs close[3] — flips on the next bar after recent direction reverses. More responsive but flips on chop. Use if you prefer the bias to track recent price action.")
 dashBgColor   = input.color(#1E1E1E, "Table BG Color",   group=G_DASH)
 dashTextColor = input.color(#FFFFFF, "Table Text Color", group=G_DASH)
 
@@ -2197,27 +2200,50 @@ if smtEnabled
 // EMA20 vs EMA50 crossover, runs cleanly in a security call.
 // 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Bias function — close vs close[3] (runs in target-TF context)
-// Direct 3-bar direction comparison. Mirrors what traders see at a glance:
-//   "last few bars up" → ▲, "last few bars down" → ▼.
+// 13.1 Bias function — user-selectable method (runs in target-TF context)
 //
-// Rationale for not using EMAs/slopes here: EMA10 averages 10 bars, so a
-// real 2-3 day reversal on EURUSD D doesn't flip EMA10 fast enough — the
-// dashboard kept lagging the trader's read of the chart. EMA20 was even
-// worse. close > close[3] flips on the next bar after a real reversal,
-// which is what the dashboard is for.
+// Two methods, picked via the "Bias Method" input in the Dashboard group:
 //
-// Per-TF behavior:
-//   W:  close vs 3 weeks ago — short-term weekly bias
-//   D:  close vs 3 days ago — 'is this week's direction up or down'
-//   4H: close vs 12 hours ago — half-day direction
-//   1H: close vs 3 hours ago — last 3-bar momentum
+// 1) STRUCTURE (default, SMC-pure) — 5/5 pivot-based BOS detection.
+//    Same logic as the chart's market structure module. Stores the most
+//    recent confirmed pivot high/low; bias flips bullish when close
+//    breaks above the stored pivot high (BOS up), bearish when close
+//    breaks below the stored pivot low (BOS down). The broken pivot is
+//    consumed (set to na) so the next confirmed pivot re-arms detection.
+//    Sticky — won't flip on pullbacks; only on real structural breaks.
+//    Var state persists per-TF inside request.security (Pine v6 keeps
+//    `var` history separate per security context).
 //
-// Trade-off: more sensitive to chop than EMA-based metrics. If price
-// oscillates within a tight range, bias may flip frequently. That's
-// preferred over stale-bullish on a real reversal.
+// 2) MOMENTUM (responsive) — close vs close[3]. Flips on the next bar
+//    after recent direction reverses. Tracks short-term price action
+//    rather than structure. Noisy on chop but matches eye-test on real
+//    reversals.
+//
+// We previously cycled through close>EMA20, EMA20/50 multi-factor,
+// EMA10 slope, and close>close[3] in pursuit of "responsive". All of
+// those approximate Momentum mode. Structure mode (the original) is
+// the SMC-correct answer for a structural-bias indicator; Momentum is
+// the responsive alternative for traders who think in price-action terms.
 f_dash_bias() =>
-    close > close[3] ? 1 : close < close[3] ? -1 : 0
+    var float lastPH = na
+    var float lastPL = na
+    var int   b      = 0
+    if biasMethod == "Momentum (responsive)"
+        b := close > close[3] ? 1 : close < close[3] ? -1 : 0
+    else
+        ph = ta.pivothigh(5, 5)
+        pl = ta.pivotlow(5, 5)
+        if not na(ph)
+            lastPH := ph
+        if not na(pl)
+            lastPL := pl
+        if not na(lastPH) and close > lastPH
+            b := 1
+            lastPH := na
+        if not na(lastPL) and close < lastPL
+            b := -1
+            lastPL := na
+    b
 
 // 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
 biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
