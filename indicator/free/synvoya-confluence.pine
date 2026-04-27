@@ -2197,18 +2197,21 @@ if smtEnabled
 // EMA20 vs EMA50 crossover, runs cleanly in a security call.
 // 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Bias function — close vs EMA20 (runs in target-TF context)
-// Simple, responsive, matches what traders see on the chart:
-//   close > EMA20 → bullish (▲)
-//   close < EMA20 → bearish (▼)
-// EMA20 reacts to pullbacks within 5-6 bars per TF, so a clean bearish
-// move on the chart pulls close below EMA20 fast and the bias flips.
-// Earlier attempts (5/5-pivot heuristic, then EMA20/50 multi-factor)
-// were too sticky on charts in long-term uptrends with recent pullbacks
-// — produced false ▲ on clearly bearish HTF action.
+// 13.1 Bias function — EMA10 slope (runs in target-TF context)
+// Compares current EMA10 to EMA10 five bars ago:
+//   EMA10[0] > EMA10[5] → bullish (▲), EMA is rising
+//   EMA10[0] < EMA10[5] → bearish (▼), EMA is falling
+// This captures the ROLLING DIRECTION over the last ~5-6 bars, not the
+// absolute price-vs-MA relationship. Critical fix: on charts where price
+// has dropped recently from higher levels, close-vs-EMA20 still showed
+// bullish because EMA20 lagged the drop. Slope-based bias flips bearish
+// as soon as the EMA itself starts curving down — which matches what
+// traders see ("price has been moving down for the last few hours").
+// Five-bar offset smooths out single-bar spikes that would otherwise flip
+// a pure EMA10 slope test on every wick.
 f_dash_bias() =>
-    ema20 = ta.ema(close, 20)
-    close > ema20 ? 1 : close < ema20 ? -1 : 0
+    ema10 = ta.ema(close, 10)
+    ema10 > ema10[5] ? 1 : ema10 < ema10[5] ? -1 : 0
 
 // 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
 biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
