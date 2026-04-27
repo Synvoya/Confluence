@@ -2197,21 +2197,27 @@ if smtEnabled
 // EMA20 vs EMA50 crossover, runs cleanly in a security call.
 // 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Bias function — EMA10 slope (runs in target-TF context)
-// Compares current EMA10 to EMA10 five bars ago:
-//   EMA10[0] > EMA10[5] → bullish (▲), EMA is rising
-//   EMA10[0] < EMA10[5] → bearish (▼), EMA is falling
-// This captures the ROLLING DIRECTION over the last ~5-6 bars, not the
-// absolute price-vs-MA relationship. Critical fix: on charts where price
-// has dropped recently from higher levels, close-vs-EMA20 still showed
-// bullish because EMA20 lagged the drop. Slope-based bias flips bearish
-// as soon as the EMA itself starts curving down — which matches what
-// traders see ("price has been moving down for the last few hours").
-// Five-bar offset smooths out single-bar spikes that would otherwise flip
-// a pure EMA10 slope test on every wick.
+// 13.1 Bias function — close vs close[3] (runs in target-TF context)
+// Direct 3-bar direction comparison. Mirrors what traders see at a glance:
+//   "last few bars up" → ▲, "last few bars down" → ▼.
+//
+// Rationale for not using EMAs/slopes here: EMA10 averages 10 bars, so a
+// real 2-3 day reversal on EURUSD D doesn't flip EMA10 fast enough — the
+// dashboard kept lagging the trader's read of the chart. EMA20 was even
+// worse. close > close[3] flips on the next bar after a real reversal,
+// which is what the dashboard is for.
+//
+// Per-TF behavior:
+//   W:  close vs 3 weeks ago — short-term weekly bias
+//   D:  close vs 3 days ago — 'is this week's direction up or down'
+//   4H: close vs 12 hours ago — half-day direction
+//   1H: close vs 3 hours ago — last 3-bar momentum
+//
+// Trade-off: more sensitive to chop than EMA-based metrics. If price
+// oscillates within a tight range, bias may flip frequently. That's
+// preferred over stale-bullish on a real reversal.
 f_dash_bias() =>
-    ema10 = ta.ema(close, 10)
-    ema10 > ema10[5] ? 1 : ema10 < ema10[5] ? -1 : 0
+    close > close[3] ? 1 : close < close[3] ? -1 : 0
 
 // 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
 biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
