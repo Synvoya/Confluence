@@ -53,7 +53,8 @@ G_OB       = "═══ Order Blocks ═══"
 G_FVG      = "═══ Fair Value Gaps ═══"
 G_LIQ      = "═══ Liquidity ═══"
 G_PD       = "═══ Premium / Discount ═══"
-G_SESSIONS = "═══ Sessions & Killzones ═══"
+G_SESSIONS  = "═══ Sessions ═══"
+G_KILLZONES = "═══ ICT Killzones ═══"
 G_LEVELS   = "═══ Key Levels ═══"
 G_CRT      = "═══ CRT (Candle Range Theory) ═══"
 G_ADR      = "═══ ADR Monitor ═══"
@@ -207,6 +208,20 @@ nyAMColor         = input.color(#00BCD4, "NY AM Color",      group=G_SESSIONS)
 nyLunchColor      = input.color(#F44336, "NY Lunch Color",   group=G_SESSIONS)
 nyPMColor         = input.color(#8BC34A, "NY PM Color",      group=G_SESSIONS)
 sessionTransp     = input.int(90, "Session Transparency", minval=0, maxval=100, group=G_SESSIONS, display=display.none)
+
+
+// ---- 1.6b ICT Killzones ----
+// Optional ICT-specific killzone windows. Default OFF — session boxes use
+// market hours by default; killzones are an opt-in for ICT traders who
+// want the classic 02-05 London / 07-10 NY / 13:30-16 NY PM / 20-00 Asia
+// liquidity windows highlighted on the chart.
+showKillzones = input.bool(false, "Show ICT Killzones",                 group=G_KILLZONES,
+     tooltip="Overlay ICT-style killzone boxes (Asia/London Open/NY AM/NY PM). Independent of the Sessions feature — sessions show market hours, killzones show liquidity windows.")
+showAsiaKZ    = input.bool(true,  "Asia Killzone (20:00-00:00 NY)",     group=G_KILLZONES)
+showLondonKZ  = input.bool(true,  "London Open Killzone (02:00-05:00 NY)", group=G_KILLZONES)
+showNYAMKZ    = input.bool(true,  "NY AM Killzone (07:00-10:00 NY)",    group=G_KILLZONES)
+showNYPMKZ    = input.bool(true,  "NY PM Killzone (13:30-16:00 NY)",    group=G_KILLZONES)
+killzoneColor = input.color(#E91E63, "Killzone Color",                  group=G_KILLZONES)
 
 
 // ---- 1.7 Key Levels ----
@@ -525,7 +540,7 @@ var SessionState asiaState      = SessionState.new()
 var SessionState preLondonState = SessionState.new()
 var SessionState londonState    = SessionState.new()
 var SessionState preNYState     = SessionState.new()
-var SessionState nyState        = SessionState.new()  // NY full block 07:00-16:00
+var SessionState nyState        = SessionState.new()  // NY full block 09:30-16:00
 var SessionState nyOpenState    = SessionState.new()
 var SessionState nyAMState      = SessionState.new()
 var SessionState nyLunchState   = SessionState.new()
@@ -542,6 +557,13 @@ var WindowState londonSBState = WindowState.new()
 var WindowState nyAMSBState   = WindowState.new()
 var WindowState nyPMSBState   = WindowState.new()
 
+// ICT Killzone window states — ICT-defined liquidity windows. Independent of
+// the Sessions feature; rendered as separately-colored boxes when enabled.
+var WindowState asiaKZState   = WindowState.new()
+var WindowState londonKZState = WindowState.new()
+var WindowState nyAMKZState   = WindowState.new()
+var WindowState nyPMKZState   = WindowState.new()
+
 var WindowState lonMacro1State     = WindowState.new()
 var WindowState lonMacro2State     = WindowState.new()
 var WindowState nyMacro1State      = WindowState.new()
@@ -554,14 +576,18 @@ var WindowState lastHourMacroState = WindowState.new()
 // ---- 3.5 Per-bar session updates ----
 sessionsOn = showSessions
 
-f_update_session(asiaState,      sessionsOn and showAsia,      19,  0,  0,  0, asiaColor,      "Asia")
-f_update_session(preLondonState, sessionsOn and showPreLondon,  1,  0,  2,  0, preLondonColor, "Pre-London")
-f_update_session(londonState,    sessionsOn and showLondon,     2,  0,  5,  0, londonColor,    "London")
-f_update_session(preNYState,     sessionsOn and showPreNY,      6,  0,  7,  0, preNYColor,     "Pre-NY")
-// Single combined NY block (default ON) — covers extended hours through cash close.
-f_update_session(nyState,        sessionsOn and showNY,         7,  0, 16,  0, nyColor,        "NY")
+// Sessions use actual MARKET HOURS (NY local time, DST-aware via America/New_York).
+// London = 03:00 NY = 08:00 BST/GMT (London cash open). NY = 09:30 NY (NYSE open).
+// For ICT killzone windows (02-05 London, 07-10 NY etc.), use the ICT Killzones
+// feature group below — those are separately toggleable.
+f_update_session(asiaState,      sessionsOn and showAsia,      19,  0,  2,  0, asiaColor,      "Asia")
+f_update_session(preLondonState, sessionsOn and showPreLondon,  2,  0,  3,  0, preLondonColor, "Pre-London")
+f_update_session(londonState,    sessionsOn and showLondon,     3,  0,  9, 30, londonColor,    "London")
+f_update_session(preNYState,     sessionsOn and showPreNY,      8,  0,  9, 30, preNYColor,     "Pre-NY")
+// Combined NY block (default ON) — NYSE cash session 09:30-16:00 NY.
+f_update_session(nyState,        sessionsOn and showNY,         9, 30, 16,  0, nyColor,        "NY")
 // Granular NY sub-sessions (all default OFF) — opt-in killzone-level detail.
-f_update_session(nyOpenState,    sessionsOn and showNYOpen,     7,  0, 10,  0, nyColor,        "NY Open")
+f_update_session(nyOpenState,    sessionsOn and showNYOpen,     9, 30, 11,  0, nyColor,        "NY Open")
 f_update_session(nyAMState,      sessionsOn and showNYAM,       9, 30, 12,  0, nyAMColor,      "NY AM")
 f_update_session(nyLunchState,   sessionsOn and showNYLunch,   12,  0, 13, 30, nyLunchColor,   "Lunch")
 f_update_session(nyPMState,      sessionsOn and showNYPM,      13, 30, 16,  0, nyPMColor,      "NY PM")
@@ -620,6 +646,14 @@ asiaWasAct := asiaState.active
 
 sbTransp    = math.max(math.min(sessionTransp -  5, 100), 0)   // [0,100], slightly more visible than sessions
 macroTransp = math.max(math.min(sessionTransp + 5, 100), 0)    // [0,100], slightly more transparent
+kzTransp    = math.max(math.min(sessionTransp - 10, 100), 0)   // [0,100], more visible — killzones are the focus when enabled
+
+// ICT Killzone windows — toggled via showKillzones master + per-window flags.
+// Asia 20-00 NY uses (20,0,0,0) which f_is_in_session handles via OR semantics.
+f_update_window(asiaKZState,   showKillzones and showAsiaKZ,   20,  0,  0,  0, killzoneColor, kzTransp)
+f_update_window(londonKZState, showKillzones and showLondonKZ,  2,  0,  5,  0, killzoneColor, kzTransp)
+f_update_window(nyAMKZState,   showKillzones and showNYAMKZ,    7,  0, 10,  0, killzoneColor, kzTransp)
+f_update_window(nyPMKZState,   showKillzones and showNYPMKZ,   13, 30, 16,  0, killzoneColor, kzTransp)
 
 f_update_window(londonSBState, showSilverBullet,  3,  0,  4,  0, SB_COLOR, sbTransp)
 f_update_window(nyAMSBState,   showSilverBullet, 10,  0, 11,  0, SB_COLOR, sbTransp)
@@ -2183,14 +2217,13 @@ bias1H = request.security(syminfo.tickerid, "60",  f_dash_bias(), lookahead = ba
 biasW  = request.security(syminfo.tickerid, "W",   f_dash_bias(), lookahead = barmerge.lookahead_off)
 
 // 13.3 Currently active session name — uses LIVE wall-clock NY time
-// (timenow), not the bar's open time. On HTF charts (4H, D), the bar
-// can open at e.g. 00:00 NY but real-time is now 02:30 NY (London) —
-// using timenow gives the trader the actually-happening session, which
-// is what the dashboard is for. Asia uses (19,0,0,0) for 19:00→00:00
-// midnight crossing; f_is_in_session_now handles s>e by switching to
-// OR semantics so it returns true for any time >= 19:00 NY.
+// (timenow), not the bar's open time. Times match the market-hours
+// session windows defined in Section 3.5. Asia covers 19:00→02:00
+// (extended past midnight to remove the gap before Pre-London).
+// Pre-NY (08:00-09:30) is checked BEFORE London (03:00-09:30) so it
+// shows during the London-NY transition pre-market window.
 f_active_session_name() =>
-    f_is_in_session_now(19, 0, 0, 0) ? "Asia" : f_is_in_session_now(1, 0, 2, 0) ? "Pre-LDN" : f_is_in_session_now(2, 0, 5, 0) ? "London" : f_is_in_session_now(6, 0, 7, 0) ? "Pre-NY" : f_is_in_session_now(7, 0, 10, 0) ? "NY Open" : f_is_in_session_now(10, 0, 12, 0) ? "NY AM" : f_is_in_session_now(12, 0, 13, 30) ? "Lunch" : f_is_in_session_now(13, 30, 16, 0) ? "NY PM" : "—"
+    f_is_in_session_now(19, 0, 2, 0) ? "Asia" : f_is_in_session_now(8, 0, 9, 30) ? "Pre-NY" : f_is_in_session_now(2, 0, 3, 0) ? "Pre-LDN" : f_is_in_session_now(3, 0, 9, 30) ? "London" : f_is_in_session_now(9, 30, 11, 0) ? "NY Open" : f_is_in_session_now(11, 0, 12, 0) ? "NY AM" : f_is_in_session_now(12, 0, 13, 30) ? "Lunch" : f_is_in_session_now(13, 30, 16, 0) ? "NY PM" : "—"
 
 // 13.4 Resolve position + size strings to constants
 f_dash_pos() =>
