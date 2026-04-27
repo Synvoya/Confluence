@@ -271,9 +271,6 @@ dashPosition  = input.string("Top Right", "Table Position",
      options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=G_DASH, display=display.none)
 dashSize      = input.string("Small", "Table Size",
      options=["Tiny", "Small", "Normal"], group=G_DASH, display=display.none)
-biasMethod    = input.string("Structure (SMC)", "Bias Method",
-     options=["Structure (SMC)", "Momentum (responsive)"], group=G_DASH,
-     tooltip="Structure (default): pivot-based BOS detection — same logic as the chart's market structure. Sticky; flips only on a real structural break. SMC-pure.\n\nMomentum: close vs close[3] — flips on the next bar after recent direction reverses. More responsive but flips on chop. Use if you prefer the bias to track recent price action.")
 dashBgColor   = input.color(#1E1E1E, "Table BG Color",   group=G_DASH)
 dashTextColor = input.color(#FFFFFF, "Table Text Color", group=G_DASH)
 
@@ -2200,56 +2197,54 @@ if smtEnabled
 // EMA20 vs EMA50 crossover, runs cleanly in a security call.
 // 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Bias function — user-selectable method (runs in target-TF context)
+// 13.1 Bias functions — TWO independent metrics shown side-by-side
+// for confluence. Both arrows agreeing = strong directional read; arrows
+// diverging = warning sign that one timeframe is in transition.
 //
-// Two methods, picked via the "Bias Method" input in the Dashboard group:
+// f_dash_bias_struct — STRUCTURE (5/5 pivot-based BOS detection)
+//   Same logic as the chart's market structure module. Stores the most
+//   recent confirmed pivot high/low; bias flips bullish when close breaks
+//   above the stored pivot high (BOS up), bearish on a downward break.
+//   The broken pivot is consumed (na) so the next confirmed pivot re-arms.
+//   Sticky — flips only on real structural breaks. SMC-pure.
+//   Var state persists per-TF inside request.security.
 //
-// 1) STRUCTURE (default, SMC-pure) — 5/5 pivot-based BOS detection.
-//    Same logic as the chart's market structure module. Stores the most
-//    recent confirmed pivot high/low; bias flips bullish when close
-//    breaks above the stored pivot high (BOS up), bearish when close
-//    breaks below the stored pivot low (BOS down). The broken pivot is
-//    consumed (set to na) so the next confirmed pivot re-arms detection.
-//    Sticky — won't flip on pullbacks; only on real structural breaks.
-//    Var state persists per-TF inside request.security (Pine v6 keeps
-//    `var` history separate per security context).
+// f_dash_bias_ema — EMA CROSSOVER (EMA10 vs EMA20)
+//   EMA10 > EMA20 → bullish, EMA10 < EMA20 → bearish.
+//   Responsive trend filter — captures 5-7 bar reversals quickly.
+//   Smoothed enough not to flip on single-bar noise.
 //
-// 2) MOMENTUM (responsive) — close vs close[3]. Flips on the next bar
-//    after recent direction reverses. Tracks short-term price action
-//    rather than structure. Noisy on chop but matches eye-test on real
-//    reversals.
-//
-// We previously cycled through close>EMA20, EMA20/50 multi-factor,
-// EMA10 slope, and close>close[3] in pursuit of "responsive". All of
-// those approximate Momentum mode. Structure mode (the original) is
-// the SMC-correct answer for a structural-bias indicator; Momentum is
-// the responsive alternative for traders who think in price-action terms.
-f_dash_bias() =>
+// Both run in target-TF context via tuple request.security calls (one
+// security call per TF returning [struct, ema] — keeps the budget at 4).
+f_dash_bias_struct() =>
     var float lastPH = na
     var float lastPL = na
     var int   b      = 0
-    if biasMethod == "Momentum (responsive)"
-        b := close > close[3] ? 1 : close < close[3] ? -1 : 0
-    else
-        ph = ta.pivothigh(5, 5)
-        pl = ta.pivotlow(5, 5)
-        if not na(ph)
-            lastPH := ph
-        if not na(pl)
-            lastPL := pl
-        if not na(lastPH) and close > lastPH
-            b := 1
-            lastPH := na
-        if not na(lastPL) and close < lastPL
-            b := -1
-            lastPL := na
+    ph = ta.pivothigh(5, 5)
+    pl = ta.pivotlow(5, 5)
+    if not na(ph)
+        lastPH := ph
+    if not na(pl)
+        lastPL := pl
+    if not na(lastPH) and close > lastPH
+        b := 1
+        lastPH := na
+    if not na(lastPL) and close < lastPL
+        b := -1
+        lastPL := na
     b
 
-// 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
-biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
-bias4H = request.security(syminfo.tickerid, "240", f_dash_bias(), lookahead = barmerge.lookahead_off)
-bias1H = request.security(syminfo.tickerid, "60",  f_dash_bias(), lookahead = barmerge.lookahead_off)
-biasW  = request.security(syminfo.tickerid, "W",   f_dash_bias(), lookahead = barmerge.lookahead_off)
+f_dash_bias_ema() =>
+    ema10 = ta.ema(close, 10)
+    ema20 = ta.ema(close, 20)
+    ema10 > ema20 ? 1 : ema10 < ema20 ? -1 : 0
+
+// 13.2 HTF bias via security — tuple returns BOTH metrics per call,
+// so the security budget stays at 4 (W/D/4H/1H) even with two bias signals.
+[biasW_s,  biasW_e]  = request.security(syminfo.tickerid, "W",   [f_dash_bias_struct(), f_dash_bias_ema()], lookahead = barmerge.lookahead_off)
+[biasD_s,  biasD_e]  = request.security(syminfo.tickerid, "D",   [f_dash_bias_struct(), f_dash_bias_ema()], lookahead = barmerge.lookahead_off)
+[bias4H_s, bias4H_e] = request.security(syminfo.tickerid, "240", [f_dash_bias_struct(), f_dash_bias_ema()], lookahead = barmerge.lookahead_off)
+[bias1H_s, bias1H_e] = request.security(syminfo.tickerid, "60",  [f_dash_bias_struct(), f_dash_bias_ema()], lookahead = barmerge.lookahead_off)
 
 // 13.3 Currently active session name — uses LIVE wall-clock NY time
 // (timenow), not the bar's open time. Times match the market-hours
@@ -2288,7 +2283,7 @@ else
     if na(dashTable) or dashPosition != lastDashPosStr
         if not na(dashTable)
             table.delete(dashTable)
-        dashTable := table.new(f_dash_pos(), columns = 2, rows = 7,
+        dashTable := table.new(f_dash_pos(), columns = 3, rows = 7,
              bgcolor      = f_alpha(dashBgColor, 10),
              border_width = 1,
              border_color = color.new(#333333, 0))
@@ -2299,33 +2294,41 @@ else
         cellBg   = f_alpha(dashBgColor, 0)
         textCol  = dashTextColor
 
-        table.cell(dashTable, 0, 0, "TF",      text_color = textCol, text_size = sz, bgcolor = cellBg)
-        table.cell(dashTable, 1, 0, "Bias",    text_color = textCol, text_size = sz, bgcolor = cellBg)
+        // Header — 3 columns: TF | Struct (5/5 pivot BOS) | EMA (10/20 cross)
+        table.cell(dashTable, 0, 0, "TF",     text_color = textCol, text_size = sz, bgcolor = cellBg)
+        table.cell(dashTable, 1, 0, "Struct", text_color = textCol, text_size = sz, bgcolor = cellBg)
+        table.cell(dashTable, 2, 0, "EMA",    text_color = textCol, text_size = sz, bgcolor = cellBg)
 
-        table.cell(dashTable, 0, 1, "W",       text_color = textCol, text_size = sz)
-        table.cell(dashTable, 1, 1, f_bias_arrow(biasW),  text_color = f_bias_arrow_color(biasW),  text_size = sz)
+        // 4 HTF bias rows — both metrics shown for confluence
+        table.cell(dashTable, 0, 1, "W", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 1, f_bias_arrow(biasW_s),  text_color = f_bias_arrow_color(biasW_s),  text_size = sz)
+        table.cell(dashTable, 2, 1, f_bias_arrow(biasW_e),  text_color = f_bias_arrow_color(biasW_e),  text_size = sz)
 
-        table.cell(dashTable, 0, 2, "D",       text_color = textCol, text_size = sz)
-        table.cell(dashTable, 1, 2, f_bias_arrow(biasD),  text_color = f_bias_arrow_color(biasD),  text_size = sz)
+        table.cell(dashTable, 0, 2, "D", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 2, f_bias_arrow(biasD_s),  text_color = f_bias_arrow_color(biasD_s),  text_size = sz)
+        table.cell(dashTable, 2, 2, f_bias_arrow(biasD_e),  text_color = f_bias_arrow_color(biasD_e),  text_size = sz)
 
-        table.cell(dashTable, 0, 3, "4H",      text_color = textCol, text_size = sz)
-        table.cell(dashTable, 1, 3, f_bias_arrow(bias4H), text_color = f_bias_arrow_color(bias4H), text_size = sz)
+        table.cell(dashTable, 0, 3, "4H", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 3, f_bias_arrow(bias4H_s), text_color = f_bias_arrow_color(bias4H_s), text_size = sz)
+        table.cell(dashTable, 2, 3, f_bias_arrow(bias4H_e), text_color = f_bias_arrow_color(bias4H_e), text_size = sz)
 
-        table.cell(dashTable, 0, 4, "1H",      text_color = textCol, text_size = sz)
-        table.cell(dashTable, 1, 4, f_bias_arrow(bias1H), text_color = f_bias_arrow_color(bias1H), text_size = sz)
+        table.cell(dashTable, 0, 4, "1H", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 4, f_bias_arrow(bias1H_s), text_color = f_bias_arrow_color(bias1H_s), text_size = sz)
+        table.cell(dashTable, 2, 4, f_bias_arrow(bias1H_e), text_color = f_bias_arrow_color(bias1H_e), text_size = sz)
 
+        // Session + NY clock — span across cols 1+2 visually by leaving col 2 blank
         table.cell(dashTable, 0, 5, "Session", text_color = textCol, text_size = sz)
         table.cell(dashTable, 1, 5, f_active_session_name(), text_color = textCol, text_size = sz)
+        table.cell(dashTable, 2, 5, "", text_size = sz)
 
         // NY clock — uses timenow (live wall-clock) so on HTF charts it
         // shows the actual current NY time, not the bar's open time.
-        // If this disagrees with the real NY wall clock, the timezone
-        // string isn't resolving correctly on the user's broker feed.
         nyH = f_ny_hour_now()
         nyM = f_ny_minute_now()
         nyTimeStr = (nyH < 10 ? "0" : "") + str.tostring(nyH) + ":" + (nyM < 10 ? "0" : "") + str.tostring(nyM)
-        table.cell(dashTable, 0, 6, "NY",      text_color = textCol, text_size = sz)
+        table.cell(dashTable, 0, 6, "NY", text_color = textCol, text_size = sz)
         table.cell(dashTable, 1, 6, nyTimeStr, text_color = textCol, text_size = sz)
+        table.cell(dashTable, 2, 6, "", text_size = sz)
 
 
 //=============================================================================
