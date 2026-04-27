@@ -2140,29 +2140,20 @@ if smtEnabled
 //=============================================================================
 // SECTION 13 — DASHBOARD TABLE
 //=============================================================================
-// 3 rows of HTF bias (D / 4H / 1H) + active session name. Bias is
-// computed inline inside request.security via f_dash_bias() — a stripped
-// version of the Phase 3 structure logic that fits a single security call.
-// 4 security calls here → total budget now 10/40 hard limit (PRD-allocated 8/8 + 2 overrun approved).
+// 4 rows of HTF bias (W / D / 4H / 1H) + active session name + NY clock.
+// Bias is computed inline inside request.security via f_dash_bias() —
+// EMA20 vs EMA50 crossover, runs cleanly in a security call.
+// 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Simplified swing-bias function (runs in target-TF context)
+// 13.1 Bias function — EMA20 vs EMA50 crossover (runs in target-TF context)
+// Replaces the prior 5/5-pivot heuristic, which produced false bullish
+// signals on clearly bearish HTF charts because every minor swing high
+// above the previous one flipped the bias. EMA crossover is a stable,
+// industry-standard trend filter that matches what traders see visually.
 f_dash_bias() =>
-    pivotH = ta.pivothigh(5, 5)
-    pivotL = ta.pivotlow(5, 5)
-    var float lastH = na
-    var float lastL = na
-    var int   b     = 0
-    if not na(pivotH)
-        lastH := pivotH
-    if not na(pivotL)
-        lastL := pivotL
-    if not na(lastH) and close > lastH
-        b := 1
-        lastH := na
-    if not na(lastL) and close < lastL
-        b := -1
-        lastL := na
-    b
+    ema20 = ta.ema(close, 20)
+    ema50 = ta.ema(close, 50)
+    ema20 > ema50 ? 1 : ema20 < ema50 ? -1 : 0
 
 // 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
 biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
@@ -2202,7 +2193,7 @@ else
     if na(dashTable) or dashPosition != lastDashPosStr
         if not na(dashTable)
             table.delete(dashTable)
-        dashTable := table.new(f_dash_pos(), columns = 2, rows = 6,
+        dashTable := table.new(f_dash_pos(), columns = 2, rows = 7,
              bgcolor      = f_alpha(dashBgColor, 10),
              border_width = 1,
              border_color = color.new(#333333, 0))
@@ -2230,6 +2221,15 @@ else
 
         table.cell(dashTable, 0, 5, "Session", text_color = textCol, text_size = sz)
         table.cell(dashTable, 1, 5, f_active_session_name(), text_color = textCol, text_size = sz)
+
+        // NY clock — verifies the indicator's internal NY time matches the
+        // actual NY clock. If this disagrees with NY wall time, the timezone
+        // string isn't resolving correctly on the user's broker feed.
+        nyH = f_ny_hour()
+        nyM = f_ny_minute()
+        nyTimeStr = (nyH < 10 ? "0" : "") + str.tostring(nyH) + ":" + (nyM < 10 ? "0" : "") + str.tostring(nyM)
+        table.cell(dashTable, 0, 6, "NY",      text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 6, nyTimeStr, text_color = textCol, text_size = sz)
 
 
 //=============================================================================
