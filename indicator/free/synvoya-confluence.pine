@@ -2326,8 +2326,8 @@ else
         nyH = f_ny_hour_now()
         nyM = f_ny_minute_now()
         nyTimeStr = (nyH < 10 ? "0" : "") + str.tostring(nyH) + ":" + (nyM < 10 ? "0" : "") + str.tostring(nyM)
-        table.cell(dashTable, 0, 6, "NY", text_color = textCol, text_size = sz)
-        table.cell(dashTable, 1, 6, nyTimeStr, text_color = textCol, text_size = sz)
+        table.cell(dashTable, 0, 6, "NY Time", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 6, nyTimeStr,  text_color = textCol, text_size = sz)
         table.cell(dashTable, 2, 6, "", text_size = sz)
 
 
