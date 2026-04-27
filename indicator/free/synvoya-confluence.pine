@@ -1,0 +1,2381 @@
+//@version=6
+// ============================================================
+// SYNVOYA CONFLUENCE v1.0.0
+// Free TradingView Community Script
+// https://github.com/Synvoya/Synvoya-Confluence
+// ============================================================
+// Pine Script v6 single-file indicator. The most comprehensive
+// free SMC/ICT toolkit on TradingView — one indicator replaces ten.
+//
+// Build phases — see docs/synvoya-confluence-free-prd.md section 18.
+// Each phase must compile cleanly in TradingView before the next begins.
+//
+// Status: PHASE 14 — Code complete. All 13 PRD modules implemented.
+// Awaiting TradingView Pine Editor compile + smoke tests on
+// EURUSD / GBPUSD / XAUUSD / NAS100 across 1m / 5m / 15m / 1H / 4H / D
+// before release-tagging v1.0.0.
+// ============================================================
+// Section 0:  Indicator Declaration
+// Section 1:  Input Groups & Settings
+// Section 2:  Utility Functions & Constants
+// Section 3:  Timezone & Session Engine
+// Section 4:  Market Structure Engine
+// Section 5:  Order Block Engine
+// Section 6:  FVG Engine
+// Section 7:  Liquidity Engine
+// Section 8:  Premium / Discount Engine
+// Section 9:  Key Levels Engine
+// Section 10: CRT Engine
+// Section 11: ADR Engine
+// Section 12: SMT Divergence Engine
+// Section 13: Dashboard Table
+// Section 14: Candle Coloring
+// Section 15: Alert Conditions
+// ============================================================
+
+
+//=============================================================================
+// SECTION 0 — INDICATOR DECLARATION
+//=============================================================================
+// Title and shorttitle both spell out the full name so the chart-status
+// row reads "Synvoya Confluence (SMC)" — never the cryptic "SynConf" abbrev.
+indicator("Synvoya Confluence (SMC)", shorttitle="Synvoya Confluence (SMC)", overlay=true,
+         max_lines_count=500, max_boxes_count=500, max_labels_count=500,
+         max_bars_back=5000)
+
+
+//=============================================================================
+// SECTION 1 — INPUT GROUPS & SETTINGS
+//=============================================================================
+// Group constants act as section dividers in the indicator settings panel.
+G_STRUCT   = "═══ Market Structure ═══"
+G_OB       = "═══ Order Blocks ═══"
+G_FVG      = "═══ Fair Value Gaps ═══"
+G_LIQ      = "═══ Liquidity ═══"
+G_PD       = "═══ Premium / Discount ═══"
+G_SESSIONS = "═══ Sessions & Killzones ═══"
+G_LEVELS   = "═══ Key Levels ═══"
+G_CRT      = "═══ CRT (Candle Range Theory) ═══"
+G_ADR      = "═══ ADR Monitor ═══"
+G_SMT      = "═══ SMT Divergence ═══"
+G_DASH     = "═══ Dashboard ═══"
+G_LEGEND   = "═══ Legend ═══"
+G_VISUAL   = "═══ Visual Settings ═══"
+
+
+// ---- 1.0 Global visual rules ----
+// htfOnly: HIGH-NOISE structure items (HH/HL/LH/LL labels, swing icon
+// markers ▽△, fractal connector lines, CRT) only render on 15m+. On 1m/5m
+// these overlap into an unreadable mess.
+//
+// LOW-NOISE items always render on all TFs regardless of this toggle:
+// BOS, CHoCH, EQH, EQL, OBs, FVGs, sweeps. Those are discrete events and
+// stay readable even on 1m.
+htfOnly        = input.bool(true,  "Show HH/HL & CRT on 15m+ only", group=G_STRUCT,
+     tooltip="When ON, the noisy items (HH/HL/LH/LL labels, swing markers ▽△, fractal connectors, CRT) only render on 15m / 30m / 1H / 4H / D / W / M. BOS, CHoCH, EQH, EQL, FVGs, and OBs always render on every timeframe.")
+rightExtBars   = input.int(5, "Line Right Extension (bars)",
+     minval=0, maxval=50, group=G_VISUAL, display=display.none,
+     tooltip="How many bars past the last candle horizontal levels (key levels, EQH/EQL, IDM, EQ, ADR, Judas, CRT) extend to. 0 = stop exactly at the last bar.")
+
+
+// ---- 1.1 Market Structure ----
+showStructure   = input.bool(true,  "Show Market Structure",     group=G_STRUCT)
+showInternal    = input.bool(true,  "Show Internal Structure",   group=G_STRUCT)
+showSwing       = input.bool(true,  "Show Swing Structure",      group=G_STRUCT)
+showBOS         = input.bool(true,  "Show BOS Labels",           group=G_STRUCT)
+showCHoCH       = input.bool(true,  "Show CHoCH Labels",         group=G_STRUCT)
+showSwingPoints = input.bool(true,  "Show Swing Points",         group=G_STRUCT)
+// HH/HL/LH/LL classification text — separate from the triangle markers and
+// default OFF so the chart looks like the standard Williams Fractals indicator
+// (clean red ▽ above highs, green △ below lows). Turn ON when you want the
+// structural classification text alongside the markers.
+showHHHL        = input.bool(false, "Show HH/HL/LH/LL Labels",   group=G_STRUCT)
+showSwingLines  = input.bool(true,  "Show Swing Lines (fractal connectors)", group=G_STRUCT)
+intLeftBars     = input.int(5,  "Internal Lookback Left",  minval=1, maxval=20, group=G_STRUCT, display=display.none)
+intRightBars    = input.int(5,  "Internal Lookback Right", minval=1, maxval=20, group=G_STRUCT, display=display.none)
+swgLeftBars     = input.int(10, "Swing Lookback Left",     minval=5, maxval=30, group=G_STRUCT, display=display.none)
+swgRightBars    = input.int(10, "Swing Lookback Right",    minval=5, maxval=30, group=G_STRUCT, display=display.none)
+confirmMode     = input.string("Close", "Confirmation", options=["Close", "Wick"], group=G_STRUCT, display=display.none)
+bullColor       = input.color(#4CAF50, "Bullish Color", group=G_STRUCT)
+bearColor       = input.color(#F44336, "Bearish Color", group=G_STRUCT)
+chochColor      = input.color(#FF9800, "CHoCH Color",   group=G_STRUCT)
+
+
+// ---- 1.2 Order Blocks ----
+showOBs         = input.bool(true,  "Show Order Blocks",   group=G_OB)
+showBullOB      = input.bool(true,  "Show Bullish OBs",    group=G_OB)
+showBearOB      = input.bool(true,  "Show Bearish OBs",    group=G_OB)
+showBreakers    = input.bool(true,  "Show Breaker Blocks", group=G_OB)
+maxOBs          = input.int(5, "Max OBs per Side", minval=1, maxval=10, group=G_OB, display=display.none)
+showMitigatedOB = input.bool(false, "Show Mitigated OBs", group=G_OB)
+showOBLabels    = input.bool(true,  "Show OB Labels",     group=G_OB)
+bullOBColor     = input.color(#4CAF50, "Bullish OB Color", group=G_OB)
+bearOBColor     = input.color(#F44336, "Bearish OB Color", group=G_OB)
+obTransp        = input.int(85, "OB Transparency", minval=0, maxval=100, group=G_OB, display=display.none)
+
+
+// ---- 1.3 Fair Value Gaps ----
+showFVGs         = input.bool(true,  "Show FVGs",            group=G_FVG)
+showBullFVG      = input.bool(true,  "Show Bullish FVGs",    group=G_FVG)
+showBearFVG      = input.bool(true,  "Show Bearish FVGs",    group=G_FVG)
+showCE           = input.bool(true,  "Show CE Line",         group=G_FVG)
+showIFVG         = input.bool(true,  "Show iFVGs",           group=G_FVG)
+showMitigatedFVG = input.bool(false, "Show Mitigated FVGs",  group=G_FVG)
+maxFVGs          = input.int(5, "Max Visible FVGs", minval=1, maxval=20, group=G_FVG, display=display.none)
+minFVGSize       = input.float(0.1, "Min FVG Size (ATR mult)", minval=0.0, maxval=1.0, step=0.05, group=G_FVG, display=display.none)
+// FVG palette — single color per state so the chart reads at a glance:
+//   active FVG (bull or bear) = BLUE  (#2196F3) — easy to see against dark bg
+//   inverted FVG (iFVG)       = ORANGE (#FF9800) — clearly different from active
+// Cream/gold defaults were tried earlier and proved too pale to spot against
+// other overlays. Users who want bull-green / bear-red can switch the inputs.
+bullFVGColor     = input.color(#2196F3, "Bullish FVG Color",  group=G_FVG)
+bearFVGColor     = input.color(#2196F3, "Bearish FVG Color",  group=G_FVG)
+iFVGBullColor    = input.color(#FF9800, "iFVG Bullish Color", group=G_FVG)
+iFVGBearColor    = input.color(#FF9800, "iFVG Bearish Color", group=G_FVG)
+fvgTransp        = input.int(65, "FVG Transparency", minval=0, maxval=100, group=G_FVG, display=display.none)
+
+
+// ---- 1.4 Liquidity ----
+showLiq         = input.bool(true,  "Show Liquidity Levels", group=G_LIQ)
+showEQH         = input.bool(true,  "Show EQH",              group=G_LIQ)
+showEQL         = input.bool(true,  "Show EQL",              group=G_LIQ)
+showSweeps      = input.bool(true,  "Show Sweep Labels",     group=G_LIQ)
+showIDM         = input.bool(true,  "Show Inducements",      group=G_LIQ)
+// EQ tolerance — distance two swing points must be within to count as "equal".
+//   "Auto (ATR)" : tolerance = ATR(14) × eqToleranceATR. Adapts to instrument
+//                  volatility — 0.10 means 10% of ATR. Works on forex AND
+//                  indices (where 10 "pips" = 2.5 NAS100 points is too tight
+//                  for any swings to ever pair).
+//   "Pips"       : tolerance = pip-aware mintick × eqTolerance (legacy mode).
+eqToleranceMode = input.string("Auto (ATR)", "EQ Tolerance Mode",
+     options=["Auto (ATR)", "Pips"], group=G_LIQ, display=display.none)
+eqToleranceATR  = input.float(0.10, "EQ Tolerance (ATR multiplier, when Auto)",
+     minval=0.01, maxval=1.0, step=0.05, group=G_LIQ, display=display.none)
+eqTolerance     = input.float(10.0, "EQ Tolerance (pips, when Mode=Pips)",
+     minval=0.0, step=1.0, group=G_LIQ, display=display.none)
+eqhColor        = input.color(#F44336, "EQH Color",   group=G_LIQ)
+eqlColor        = input.color(#4CAF50, "EQL Color",   group=G_LIQ)
+sweptColor      = input.color(#9E9E9E, "Swept Color", group=G_LIQ)
+
+
+// ---- 1.5 Premium / Discount ----
+showPD          = input.bool(true,  "Show P/D Zones",        group=G_PD)
+showEQ          = input.bool(true,  "Show Equilibrium Line", group=G_PD)
+showZoneShading = input.bool(true,  "Show Zone Shading",     group=G_PD)
+// "% Prem"/"% Disc" floating label — default OFF. The zone shading already
+// communicates premium-vs-discount; the percentage adds clutter near price.
+showPctReadout  = input.bool(false, "Show % Readout",        group=G_PD)
+premColor       = input.color(#F44336, "Premium Color",  group=G_PD)
+discColor       = input.color(#4CAF50, "Discount Color", group=G_PD)
+eqColor         = input.color(#9E9E9E, "EQ Color",       group=G_PD)
+zoneTransp      = input.int(95, "Zone Transparency", minval=0, maxval=100, group=G_PD, display=display.none)
+
+
+// ---- 1.6 Sessions & Killzones ----
+showSessions      = input.bool(true,  "Show Sessions",              group=G_SESSIONS)
+showAsia          = input.bool(true,  "Show Asia",                  group=G_SESSIONS)
+showPreLondon     = input.bool(true,  "Show Pre-London",            group=G_SESSIONS)
+showLondon        = input.bool(true,  "Show London",                group=G_SESSIONS)
+showPreNY         = input.bool(true,  "Show Pre-NY",                group=G_SESSIONS)
+// Single combined "NY" block — 07:00-16:00 EST, covers extended hours +
+// cash session as one box. Default ON. The granular sub-sessions below
+// (NY Open / NY AM Cash / NY Lunch / NY PM) overlap with this block and
+// are off by default to avoid visual stacking. Turn them on if you want
+// killzone-level detail.
+showNY            = input.bool(true,  "Show NY (full)",             group=G_SESSIONS)
+showNYOpen        = input.bool(false, "Show NY Open (sub)",         group=G_SESSIONS)
+showNYAM          = input.bool(false, "Show NY AM Cash (sub)",      group=G_SESSIONS)
+showNYLunch       = input.bool(false, "Show NY Lunch (sub)",        group=G_SESSIONS)
+showNYPM          = input.bool(false, "Show NY PM (sub)",           group=G_SESSIONS)
+// Session H/L lines used to extend right indefinitely and clutter the chart
+// with horizontal session-extreme rays. Default OFF — the session box already
+// shows the high and low; traders who specifically want the rays can re-enable.
+showSessionHL     = input.bool(false, "Show Session H/L Lines",     group=G_SESSIONS)
+showAsiaHL        = input.bool(false, "Show Asia H/L Extension (past session end)", group=G_SESSIONS,
+     tooltip="Plots Asia session High and Low as dashed lines that extend into London and NY sessions. Useful as a reference for stop hunts and liquidity draws.")
+showSessionLabels = input.bool(true,  "Show Session Labels",        group=G_SESSIONS)
+showSilverBullet  = input.bool(false, "Show Silver Bullet Windows", group=G_SESSIONS)
+showICTMacros     = input.bool(false, "Show ICT Macros",            group=G_SESSIONS)
+// Every session gets its own color input — previously Pre-London, Pre-NY,
+// NY AM, NY Lunch, NY PM were hardcoded and uncustomizable.
+asiaColor         = input.color(#9C27B0, "Asia Color",       group=G_SESSIONS)
+preLondonColor    = input.color(#FF9800, "Pre-London Color", group=G_SESSIONS)
+londonColor       = input.color(#2196F3, "London Color",     group=G_SESSIONS)
+preNYColor        = input.color(#FF9800, "Pre-NY Color",     group=G_SESSIONS)
+nyColor           = input.color(#4CAF50, "NY Open Color",    group=G_SESSIONS)
+nyAMColor         = input.color(#00BCD4, "NY AM Color",      group=G_SESSIONS)
+nyLunchColor      = input.color(#F44336, "NY Lunch Color",   group=G_SESSIONS)
+nyPMColor         = input.color(#8BC34A, "NY PM Color",      group=G_SESSIONS)
+sessionTransp     = input.int(90, "Session Transparency", minval=0, maxval=100, group=G_SESSIONS, display=display.none)
+
+
+// ---- 1.7 Key Levels ----
+showLevels      = input.bool(true,  "Show Key Levels",       group=G_LEVELS)
+showPDH_PDL     = input.bool(true,  "Show PDH/PDL",          group=G_LEVELS)
+showPWH_PWL     = input.bool(true,  "Show PWH/PWL",          group=G_LEVELS)
+showPMH_PML     = input.bool(false, "Show PMH/PML",          group=G_LEVELS)
+showMonday      = input.bool(false, "Show Monday H/L",       group=G_LEVELS)
+showNYMidnight  = input.bool(true,  "Show NY Midnight Open", group=G_LEVELS)
+showLevelLabels = input.bool(true,  "Show Level Labels",     group=G_LEVELS)
+dailyColor      = input.color(#FF9800, "Daily Color",   group=G_LEVELS)
+weeklyColor     = input.color(#2196F3, "Weekly Color",  group=G_LEVELS)
+monthlyColor    = input.color(#9C27B0, "Monthly Color", group=G_LEVELS)
+
+
+// ---- 1.8 CRT (Candle Range Theory) ----
+showCRT       = input.bool(true, "Show CRT",        group=G_CRT)
+showCRTLabels = input.bool(true, "Show CRT Labels", group=G_CRT)
+bullCRTColor  = input.color(#4CAF50, "Bullish CRT Color", group=G_CRT)
+bearCRTColor  = input.color(#F44336, "Bearish CRT Color", group=G_CRT)
+crtLineStyle  = input.string("Dashed", "CRT Line Style", options=["Solid", "Dashed", "Dotted"], group=G_CRT, display=display.none)
+
+
+// ---- 1.9 ADR Monitor ----
+// Default OFF — ADR % consumption is information-dense but adds chart clutter
+// for traders who don't actively use range targets. Enable when you do.
+showADR      = input.bool(false, "Show ADR",                  group=G_ADR)
+adrPeriod    = input.int(14, "ADR Period", minval=5, maxval=30, group=G_ADR, display=display.none)
+showADRProj  = input.bool(false, "Show ADR Projection Lines", group=G_ADR)
+showJudas    = input.bool(false, "Show Judas Levels",         group=G_ADR)
+adrColor     = input.color(#FF9800, "ADR Color", group=G_ADR)
+adrThreshold = input.int(80, "ADR Exhaustion Threshold %", minval=50, maxval=95, group=G_ADR, display=display.none)
+
+
+// ---- 1.10 SMT Divergence ----
+showSMT         = input.bool(true, "Show SMT", group=G_SMT)
+smtPairOverride = input.string("", "Correlated Pair Override", group=G_SMT, display=display.none,
+     tooltip="Leave blank for auto-detection. Format: EXCHANGE:SYMBOL e.g. FX:GBPUSD")
+showSMTLabels   = input.bool(true, "Show SMT Labels", group=G_SMT)
+bullSMTColor    = input.color(#4CAF50, "Bullish SMT Color", group=G_SMT)
+bearSMTColor    = input.color(#F44336, "Bearish SMT Color", group=G_SMT)
+
+
+// ---- 1.11 Dashboard ----
+showDash      = input.bool(true, "Show Dashboard", group=G_DASH)
+dashPosition  = input.string("Top Right", "Table Position",
+     options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=G_DASH, display=display.none)
+dashSize      = input.string("Small", "Table Size",
+     options=["Tiny", "Small", "Normal"], group=G_DASH, display=display.none)
+dashBgColor   = input.color(#1E1E1E, "Table BG Color",   group=G_DASH)
+dashTextColor = input.color(#FFFFFF, "Table Text Color", group=G_DASH)
+
+
+// ---- 1.12 Legend ----
+// Toggleable abbreviation-key table — explains OB, BB, FVG, iFVG, CE, EQH/EQL,
+// IDM, PDH/PDL/PWH/PWL/PMH/PML, NY Mid, ADR, SMT, CRT, BOS, CHoCH, HH/HL/LH/LL.
+// Default ON — the indicator throws a lot of acronyms on the chart and new
+// users shouldn't have to guess what they mean. Power users turn it off.
+showLegend     = input.bool(true,  "Show Legend",       group=G_LEGEND)
+legendPosition = input.string("Bottom Right", "Legend Position",
+     options=["Top Right", "Top Left", "Bottom Right", "Bottom Left", "Middle Right", "Middle Left"],
+     group=G_LEGEND, display=display.none)
+legendSize     = input.string("Tiny", "Legend Size",
+     options=["Tiny", "Small", "Normal"], group=G_LEGEND, display=display.none)
+
+
+// ---- 1.13 Visual Settings ----
+enableCandleColor = input.bool(false, "Enable Candle Coloring", group=G_VISUAL)
+// Candle Color Mode:
+//   "Direction" — color by candle's own close vs open (what users expect when
+//                 they hear "candle coloring"). Bullish bars green, bearish red.
+//   "Structure" — color by swing-level structural bias (the original PRD intent;
+//                 useful for "trend at-a-glance" but counter-intuitive because
+//                 every candle in a bullish trend tints green even when bearish).
+candleColorMode   = input.string("Direction", "Candle Color Mode",
+     options=["Direction", "Structure"], group=G_VISUAL, display=display.none)
+bullCandleColor   = input.color(#4CAF50, "Bullish Candle Color", group=G_VISUAL)
+bearCandleColor   = input.color(#F44336, "Bearish Candle Color", group=G_VISUAL)
+
+
+//=============================================================================
+// SECTION 2 — UTILITY FUNCTIONS & CONSTANTS
+//=============================================================================
+
+// ---- NY-localized time getters ----
+// Every session/macro check in this indicator uses America/New_York time
+// so broker timezone differences and DST transitions are auto-handled.
+// Never read raw hour(time) / minute(time) anywhere else in the file.
+f_ny_hour()   => hour(time, "America/New_York")
+f_ny_minute() => minute(time, "America/New_York")
+
+
+// ---- Session window check ----
+// Returns true when the current bar falls within [startH:startM, endH:endM)
+// in NY time. Handles sessions that cross midnight (e.g. Asia 19:00 → 00:00)
+// by switching to OR semantics when start > end.
+f_is_in_session(startH, startM, endH, endM) =>
+    cur = f_ny_hour() * 60 + f_ny_minute()
+    s   = startH * 60 + startM
+    e   = endH   * 60 + endM
+    s > e ? (cur >= s or cur < e) : (cur >= s and cur < e)
+
+
+// ---- Color helpers ----
+// Apply transparency (0 = solid, 100 = fully transparent). Single named
+// wrapper around color.new keeps visual settings consistent and lets us
+// swap implementations later without touching every call site.
+f_alpha(c, transp) => color.new(c, transp)
+
+
+// Pick the right color for a structural-bias state.
+// bias: 1 = bullish, -1 = bearish, 0 = neutral.
+f_bias_color(bias, bull_c, bear_c, neutral_c) =>
+    bias == 1 ? bull_c : bias == -1 ? bear_c : neutral_c
+
+
+// ---- HTF gate ----
+// True when the chart's timeframe is 15m or higher. Used to suppress
+// market-structure labels and CRT on 1m/5m where they're too noisy.
+// 900 sec = 15 min. timeframe.in_seconds() returns the chart TF in seconds.
+f_is_htf() => timeframe.in_seconds(timeframe.period) >= 900
+
+// Resolved per-bar — most call sites are gated by `htfOnly` AND this check.
+// Using `not htfOnly or f_is_htf()` makes the labels show on all TFs when
+// the user disables htfOnly, and on 15m+ when enabled.
+htfPass = not htfOnly or f_is_htf()
+
+
+// ---- Right-edge anchor for extending lines ----
+// Replaces `extend = extend.right`. The line stops `rightExtBars` past the
+// last bar so labels can sit on the right edge without spilling off-screen.
+f_right_anchor() => bar_index + rightExtBars
+
+
+//=============================================================================
+// SECTION 3 — TIMEZONE & SESSION ENGINE
+//=============================================================================
+// Renders Asia, Pre-London, London, Pre-NY, NY Open, NY AM Cash, NY Lunch,
+// NY PM session boxes; tracks session H/L lines + name labels; renders Silver
+// Bullet windows and ICT Macros. All time logic flows through f_is_in_session
+// (Section 2), which is NY-localized.
+
+// ---- 3.1 Static window colors (Silver Bullet + ICT macros) ----
+// Every session now has a user-facing input.color in Section 1.6. Only
+// the Silver Bullet windows and ICT macros stay hardcoded here.
+SB_COLOR    = #FFEB3B   // Silver Bullet — yellow
+MACRO_COLOR = #B0BEC5   // ICT Macro — muted blue-gray
+
+// ---- 3.2 Per-session state types ----
+type SessionState
+    bool  active = false
+    box   bx        = na
+    line  hiLine    = na
+    line  loLine    = na
+    label nameLabel = na
+    float hi        = na
+    float lo        = na
+
+type WindowState
+    bool active = false
+    box  bx     = na
+
+// ---- 3.3 Updaters ----
+// f_update_session: full session with box, H/L lines, and name label.
+// State machine on inSess vs state.active:
+//   off -> on  : delete prior H/L + label, create new box / lines / label
+//   on  -> on  : extend high/low, push box right, slide label up to current high
+//   on  -> off : freeze (do nothing — box and H/L lines persist as historical reference)
+//   show=false : tear everything down
+f_update_session(SessionState state, bool show, int startH, int startM,
+                 int endH, int endM, color sessC, string name) =>
+    inSess = f_is_in_session(startH, startM, endH, endM)
+    // Pine v6 CE10235: shared int sentinel aligns return types of every
+    // branch in the chained if/elif/elif (bool / void / bool would error).
+    _step = 0
+
+    if not show
+        if not na(state.bx)
+            box.delete(state.bx)
+            state.bx := na
+        if not na(state.hiLine)
+            line.delete(state.hiLine)
+            state.hiLine := na
+        if not na(state.loLine)
+            line.delete(state.loLine)
+            state.loLine := na
+        if not na(state.nameLabel)
+            label.delete(state.nameLabel)
+            state.nameLabel := na
+        state.active := false
+        _step := 1
+    else
+        if inSess and not state.active
+            // Session start — replace prior H/L + label with fresh ones.
+            // The previous session's box is left in place as historical context.
+            if not na(state.hiLine)
+                line.delete(state.hiLine)
+            if not na(state.loLine)
+                line.delete(state.loLine)
+            if not na(state.nameLabel)
+                label.delete(state.nameLabel)
+
+            state.hi := high
+            state.lo := low
+            state.bx := box.new(time, high, time, low,
+                 bgcolor     = f_alpha(sessC, sessionTransp),
+                 border_color= f_alpha(sessC, math.max(sessionTransp - 30, 0)),
+                 xloc        = xloc.bar_time)
+
+            if showSessionHL
+                // Session H/L lines now stop at the live edge — no extend.right.
+                // Old behavior turned every session into a horizontal ray that
+                // bled across the chart for hours after the session ended.
+                state.hiLine := line.new(time, high, time, high,
+                     color  = sessC,
+                     style  = line.style_solid,
+                     xloc   = xloc.bar_time)
+                state.loLine := line.new(time, low, time, low,
+                     color  = sessC,
+                     style  = line.style_solid,
+                     xloc   = xloc.bar_time)
+
+            if showSessionLabels
+                state.nameLabel := label.new(time, high, name,
+                     style    = label.style_label_down,
+                     color    = sessC,
+                     textcolor= color.white,
+                     xloc     = xloc.bar_time,
+                     size     = size.small)
+
+            state.active := true
+            _step := 2
+
+        else if inSess
+            // Session ongoing — extend high/low and push the box right.
+            state.hi := math.max(state.hi, high)
+            state.lo := math.min(state.lo, low)
+            box.set_top(state.bx, state.hi)
+            box.set_bottom(state.bx, state.lo)
+            box.set_right(state.bx, time)
+
+            if showSessionHL and not na(state.hiLine)
+                // Update y AND x2 every bar so the line stays horizontal and
+                // its right edge tracks the live bar. No extend.right anymore —
+                // the line is bounded to the session itself.
+                line.set_y1(state.hiLine, state.hi)
+                line.set_y2(state.hiLine, state.hi)
+                line.set_x2(state.hiLine, time)
+                line.set_y1(state.loLine, state.lo)
+                line.set_y2(state.loLine, state.lo)
+                line.set_x2(state.loLine, time)
+
+            if showSessionLabels and not na(state.nameLabel)
+                label.set_y(state.nameLabel, state.hi)
+            _step := 3
+
+        else if not inSess and state.active
+            // Session just ended — freeze. Box and (optional) H/L lines stay
+            // at their last extent. They get torn down on the next instance of
+            // this session, not on session-end.
+            state.active := false
+            _step := 4
+
+
+// f_update_window: lightweight session-like box with no H/L lines, no label.
+// Used for Silver Bullet windows and ICT macros.
+f_update_window(WindowState state, bool show, int startH, int startM,
+                int endH, int endM, color winC, int transp) =>
+    inWin = f_is_in_session(startH, startM, endH, endM)
+    // Pine v6 CE10235 prevention: shared int sentinel across all branches.
+    _step = 0
+
+    if not show
+        if not na(state.bx)
+            box.delete(state.bx)
+            state.bx := na
+        state.active := false
+        _step := 1
+    else
+        if inWin and not state.active
+            state.bx := box.new(time, high, time, low,
+                 bgcolor     = f_alpha(winC, transp),
+                 border_color= f_alpha(winC, math.max(transp - 20, 0)),
+                 xloc        = xloc.bar_time)
+            state.active := true
+            _step := 2
+        else if inWin and not na(state.bx)
+            box.set_top(state.bx, math.max(box.get_top(state.bx), high))
+            box.set_bottom(state.bx, math.min(box.get_bottom(state.bx), low))
+            box.set_right(state.bx, time)
+            _step := 3
+        else if not inWin and state.active
+            state.active := false
+            _step := 4
+
+// ---- 3.4 Session and window state instances ----
+var SessionState asiaState      = SessionState.new()
+var SessionState preLondonState = SessionState.new()
+var SessionState londonState    = SessionState.new()
+var SessionState preNYState     = SessionState.new()
+var SessionState nyState        = SessionState.new()  // NY full block 07:00-16:00
+var SessionState nyOpenState    = SessionState.new()
+var SessionState nyAMState      = SessionState.new()
+var SessionState nyLunchState   = SessionState.new()
+var SessionState nyPMState      = SessionState.new()
+
+// Asia range H/L extension state — lines persist past session end into London/NY
+var line  asiaHiExt  = na
+var line  asiaLoExt  = na
+var label asiaHiLbl  = na
+var label asiaLoLbl  = na
+var bool  asiaWasAct = false
+
+var WindowState londonSBState = WindowState.new()
+var WindowState nyAMSBState   = WindowState.new()
+var WindowState nyPMSBState   = WindowState.new()
+
+var WindowState lonMacro1State     = WindowState.new()
+var WindowState lonMacro2State     = WindowState.new()
+var WindowState nyMacro1State      = WindowState.new()
+var WindowState nyMacro2State      = WindowState.new()
+var WindowState nyMacro3State      = WindowState.new()
+var WindowState nyLunchMacroState  = WindowState.new()
+var WindowState nyPMMacroState     = WindowState.new()
+var WindowState lastHourMacroState = WindowState.new()
+
+// ---- 3.5 Per-bar session updates ----
+sessionsOn = showSessions
+
+f_update_session(asiaState,      sessionsOn and showAsia,      19,  0,  0,  0, asiaColor,      "Asia")
+f_update_session(preLondonState, sessionsOn and showPreLondon,  1,  0,  2,  0, preLondonColor, "Pre-London")
+f_update_session(londonState,    sessionsOn and showLondon,     2,  0,  5,  0, londonColor,    "London")
+f_update_session(preNYState,     sessionsOn and showPreNY,      6,  0,  7,  0, preNYColor,     "Pre-NY")
+// Single combined NY block (default ON) — covers extended hours through cash close.
+f_update_session(nyState,        sessionsOn and showNY,         7,  0, 16,  0, nyColor,        "NY")
+// Granular NY sub-sessions (all default OFF) — opt-in killzone-level detail.
+f_update_session(nyOpenState,    sessionsOn and showNYOpen,     7,  0, 10,  0, nyColor,        "NY Open")
+f_update_session(nyAMState,      sessionsOn and showNYAM,       9, 30, 12,  0, nyAMColor,      "NY AM")
+f_update_session(nyLunchState,   sessionsOn and showNYLunch,   12,  0, 13, 30, nyLunchColor,   "Lunch")
+f_update_session(nyPMState,      sessionsOn and showNYPM,      13, 30, 16,  0, nyPMColor,      "NY PM")
+
+// ---- 3.5b Asia H/L extension lines ----
+// Dashed AsiaH / AsiaL lines that appear after Asia closes and extend into
+// London + NY sessions as reference levels for stop hunts and liquidity draws.
+// Lines are deleted when the next Asia session starts (stale level gone).
+if not (sessionsOn and showAsiaHL)
+    if not na(asiaHiExt)
+        line.delete(asiaHiExt)
+        asiaHiExt := na
+    if not na(asiaLoExt)
+        line.delete(asiaLoExt)
+        asiaLoExt := na
+    if not na(asiaHiLbl)
+        label.delete(asiaHiLbl)
+        asiaHiLbl := na
+    if not na(asiaLoLbl)
+        label.delete(asiaLoLbl)
+        asiaLoLbl := na
+else
+    if asiaState.active and not asiaWasAct
+        // New Asia session started — clear yesterday's extension lines
+        if not na(asiaHiExt)
+            line.delete(asiaHiExt)
+            asiaHiExt := na
+        if not na(asiaLoExt)
+            line.delete(asiaLoExt)
+            asiaLoExt := na
+        if not na(asiaHiLbl)
+            label.delete(asiaHiLbl)
+            asiaHiLbl := na
+        if not na(asiaLoLbl)
+            label.delete(asiaLoLbl)
+            asiaLoLbl := na
+    if not asiaState.active and asiaWasAct and not na(asiaState.hi)
+        // Session just ended — spawn extension lines from the close bar
+        asiaHiExt := line.new(bar_index, asiaState.hi, bar_index + rightExtBars, asiaState.hi,
+             color = asiaColor, style = line.style_dashed, width = 1)
+        asiaLoExt := line.new(bar_index, asiaState.lo, bar_index + rightExtBars, asiaState.lo,
+             color = asiaColor, style = line.style_dashed, width = 1)
+        asiaHiLbl := label.new(bar_index + rightExtBars, asiaState.hi, "AsiaH",
+             style = label.style_label_left, color = color.new(asiaColor, 80),
+             textcolor = asiaColor, size = size.tiny)
+        asiaLoLbl := label.new(bar_index + rightExtBars, asiaState.lo, "AsiaL",
+             style = label.style_label_left, color = color.new(asiaColor, 80),
+             textcolor = asiaColor, size = size.tiny)
+    if not na(asiaHiExt)
+        // Every bar — push right edge forward
+        line.set_x2(asiaHiExt, bar_index + rightExtBars)
+        line.set_x2(asiaLoExt, bar_index + rightExtBars)
+        label.set_x(asiaHiLbl, bar_index + rightExtBars)
+        label.set_x(asiaLoLbl, bar_index + rightExtBars)
+asiaWasAct := asiaState.active
+
+sbTransp    = math.max(math.min(sessionTransp -  5, 100), 0)   // [0,100], slightly more visible than sessions
+macroTransp = math.max(math.min(sessionTransp + 5, 100), 0)    // [0,100], slightly more transparent
+
+f_update_window(londonSBState, showSilverBullet,  3,  0,  4,  0, SB_COLOR, sbTransp)
+f_update_window(nyAMSBState,   showSilverBullet, 10,  0, 11,  0, SB_COLOR, sbTransp)
+f_update_window(nyPMSBState,   showSilverBullet, 14,  0, 15,  0, SB_COLOR, sbTransp)
+
+f_update_window(lonMacro1State,     showICTMacros,  2, 33,  3,  0, MACRO_COLOR, macroTransp)
+f_update_window(lonMacro2State,     showICTMacros,  4,  3,  4, 30, MACRO_COLOR, macroTransp)
+f_update_window(nyMacro1State,      showICTMacros,  8, 50,  9, 10, MACRO_COLOR, macroTransp)
+f_update_window(nyMacro2State,      showICTMacros,  9, 50, 10, 10, MACRO_COLOR, macroTransp)
+f_update_window(nyMacro3State,      showICTMacros, 10, 50, 11, 10, MACRO_COLOR, macroTransp)
+f_update_window(nyLunchMacroState,  showICTMacros, 11, 50, 12, 10, MACRO_COLOR, macroTransp)
+f_update_window(nyPMMacroState,     showICTMacros, 13, 10, 13, 40, MACRO_COLOR, macroTransp)
+f_update_window(lastHourMacroState, showICTMacros, 15, 15, 15, 45, MACRO_COLOR, macroTransp)
+
+
+//=============================================================================
+// SECTION 4 — MARKET STRUCTURE ENGINE (BOS / CHoCH / SWINGS)
+//=============================================================================
+// Two independent layers — Internal (short-term) and Swing (longer-term).
+// Each runs its own pivot detection (ta.pivothigh / ta.pivotlow) and its
+// own bias state machine.
+//
+// Bias rules:
+//   bias = 0  : no break has happened yet
+//   bias = 1  : last break was upward
+//   bias = -1 : last break was downward
+//
+// On upward break of stored pivot high:
+//   bias was -1 → CHoCH (bullish)
+//   bias was  0 → BOS  (establishing bullish bias)
+//   bias was  1 → BOS  (continuation)
+// Mirror for downward break of stored pivot low.
+//
+// confirmMode = "Close" : break needs close beyond level
+// confirmMode = "Wick"  : any wick penetration counts
+
+// 4.1 Pivots (both layers)
+intPivotH = ta.pivothigh(intLeftBars, intRightBars)
+intPivotL = ta.pivotlow(intLeftBars,  intRightBars)
+swgPivotH = ta.pivothigh(swgLeftBars, swgRightBars)
+swgPivotL = ta.pivotlow(swgLeftBars,  swgRightBars)
+
+// 4.2 Per-layer state
+type StructState
+    int   bias    = 0
+    float ph      = na     // current unbroken pivot high (target for upward break)
+    float pl      = na     // current unbroken pivot low  (target for downward break)
+    int   phBar   = na     // bar_index of the pivot high
+    int   plBar   = na     // bar_index of the pivot low
+    float prevPH  = na     // previous pivot high — for HH/LH classification
+    float prevPL  = na     // previous pivot low  — for HL/LL classification
+    int   prevPHBar = na   // bar_index of the previous pivot high (for fractal connector lines)
+    int   prevPLBar = na   // bar_index of the previous pivot low
+    // Break event flags — true only on the bar where the break confirms.
+    // Reset at the top of every f_update_structure call. Consumed by
+    // Phase 4 (OBs), Phase 13 (alerts), etc.
+    bool  bullBreakNow = false
+    bool  bearBreakNow = false
+    int   bullBreakLevelBar = na     // bar of the broken pivot (for OB scan)
+    int   bearBreakLevelBar = na
+
+var StructState intStruct = StructState.new()
+var StructState swgStruct = StructState.new()
+
+// 4.3 Break-detection threshold values (depend on confirmMode)
+breakUpVal   = confirmMode == "Close" ? close : high
+breakDownVal = confirmMode == "Close" ? close : low
+
+// 4.4 Render HH/HL/LH/LL classification text at a pivot bar.
+// Triangle fractal markers are drawn via plotshape in section 4.8 — using
+// plotshape produces proper solid filled triangles (Williams Fractal style)
+// rather than the filled label containers that label.style_triangledown yields.
+f_render_pivot(int barX, float price, bool isHigh, bool isHigherThanPrev, bool isInternal) =>
+    markerSize = isInternal ? size.tiny : size.small
+    classColor  = isHigherThanPrev ? bullColor : bearColor
+
+    // HH/HL/LH/LL text — ATR-offset above/below the pivot so it doesn't
+    // sit on top of the plotshape fractal marker.
+    if showHHHL
+        cls    = isHigh ? (isHigherThanPrev ? "HH" : "LH") : (isHigherThanPrev ? "HL" : "LL")
+        atrOff = ta.atr(14) * 0.5
+        textY  = isHigh ? price + atrOff : price - atrOff
+        label.new(barX, textY, cls,
+             style     = label.style_none,
+             textcolor = classColor,
+             size      = markerSize)
+
+// Draw a fractal connector — a dotted line between the previous pivot and the
+// new pivot of the same direction. Color reflects the structural movement
+// (higher = bullColor, lower = bearColor). Width thicker for swing layer.
+f_draw_swing_connector(int prevBar, float prevPrice, int curBar, float curPrice,
+                        bool isHigherThanPrev, bool isInternal) =>
+    if showSwingLines and not na(prevBar) and not na(prevPrice)
+        line.new(prevBar, prevPrice, curBar, curPrice,
+             color = isHigherThanPrev ? bullColor : bearColor,
+             style = line.style_dotted,
+             width = isInternal ? 1 : 2)
+
+// 4.5 Render a structure-break event (BOS or CHoCH)
+//   typ:        "BOS" or "CHoCH"
+//   dir:        1 (bullish break) or -1 (bearish break)
+//   isInternal: dashed line, "i"-prefixed label, smaller text
+//   fromBar:    bar of the broken pivot
+//   toBar:      current bar (where the break is confirmed)
+//   breakPrice: pivot price that was broken
+//
+// Swing-layer labels render at size.normal with a tinted background so they
+// stand out above HH/HL fractal text. Internal-layer keeps size.tiny so it
+// stays visually subordinate to the swing layer.
+f_draw_break(string typ, int dir, bool isInternal, int fromBar, int toBar, float breakPrice) =>
+    txt       = isInternal ? "i" + typ : typ
+    isCHoCH   = typ == "CHoCH"
+    lblColor  = isCHoCH ? chochColor : (dir == 1 ? bullColor : bearColor)
+    lineStyle = isInternal ? line.style_dashed : line.style_solid
+    lblSize   = isInternal ? size.tiny : size.normal
+    lblBg     = isInternal ? color.new(color.white, 100) : color.new(lblColor, 70)
+
+    line.new(fromBar, breakPrice, toBar, breakPrice,
+         color = lblColor,
+         style = lineStyle,
+         width = isInternal ? 1 : 2)
+
+    // Label sits at the MIDPOINT of the break line, centered between the
+    // broken pivot and the break candle. Reads as a caption on the line
+    // rather than a marker stuck at one end.
+    midBar = math.round(0.5 * (fromBar + toBar))
+    label.new(midBar, breakPrice, txt,
+         style     = dir == 1 ? label.style_label_down : label.style_label_up,
+         color     = lblBg,
+         textcolor = lblColor,
+         size      = lblSize)
+
+// 4.6 Run one layer's state machine for the current bar
+//   pivotH / pivotL   : the layer's pivot values (na unless a pivot was confirmed)
+//   rightBars         : the layer's right lookback (to recover pivot bar_index)
+//   isInternal        : true for the internal layer (changes line style + label text)
+//   suppressBullLabel : skip drawing the bull break label (used by internal layer
+//                       when swing already drew a BOS on the same bar — prevents
+//                       iBOS and BOS stacking on the same level)
+//   suppressBearLabel : same for bear breaks
+f_update_structure(StructState state, float pivotH, float pivotL, int rightBars, bool isInternal,
+                   bool suppressBullLabel, bool suppressBearLabel) =>
+    // Reset per-bar break flags up front so consumers see only this bar's events.
+    state.bullBreakNow := false
+    state.bearBreakNow := false
+
+    // Two-tier visibility:
+    //   layerShow         — base toggle. Controls BOS/CHoCH labels (these are
+    //                       discrete events, low-noise even on 1m, always show).
+    //   layerShowDetailed — adds the htfPass gate. Controls the noisy items
+    //                       (pivot icons, HH/HL/LH/LL text, fractal connectors)
+    //                       that overwhelm the chart on 1m/5m.
+    // The state machine itself runs unconditionally so the bias stays correct
+    // on every TF (the dashboard, OBs, SMT, candle coloring all read it).
+    layerShow         = showStructure and (isInternal ? showInternal : showSwing)
+    layerShowDetailed = layerShow and htfPass
+
+    // Pivot high formed — shift prev/curr, optionally render marker + connector
+    if not na(pivotH)
+        state.prevPH    := state.ph
+        state.prevPHBar := state.phBar
+        state.ph        := pivotH
+        state.phBar     := bar_index - rightBars
+        if layerShowDetailed
+            isHigher = na(state.prevPH) ? true : pivotH > state.prevPH
+            f_render_pivot(state.phBar, pivotH, true, isHigher, isInternal)
+            f_draw_swing_connector(state.prevPHBar, state.prevPH, state.phBar, pivotH, isHigher, isInternal)
+
+    // Pivot low formed
+    if not na(pivotL)
+        state.prevPL    := state.pl
+        state.prevPLBar := state.plBar
+        state.pl        := pivotL
+        state.plBar     := bar_index - rightBars
+        if layerShowDetailed
+            isHigher = na(state.prevPL) ? true : pivotL > state.prevPL
+            f_render_pivot(state.plBar, pivotL, false, isHigher, isInternal)
+            f_draw_swing_connector(state.prevPLBar, state.prevPL, state.plBar, pivotL, isHigher, isInternal)
+
+    // Upward break of stored pivot high — state mutation always runs.
+    // Label suppressed when swing layer already drew BOS on this bar.
+    if not na(state.ph) and breakUpVal > state.ph
+        isCHoCH = state.bias == -1
+        if layerShow and not suppressBullLabel
+            typ = isCHoCH ? "CHoCH" : "BOS"
+            showThisBreak = isCHoCH ? showCHoCH : showBOS
+            if showThisBreak
+                f_draw_break(typ, 1, isInternal, state.phBar, bar_index, state.ph)
+        state.bullBreakNow      := true
+        state.bullBreakLevelBar := state.phBar
+        state.bias := 1
+        state.ph   := na
+
+    // Downward break of stored pivot low
+    if not na(state.pl) and breakDownVal < state.pl
+        isCHoCH = state.bias == 1
+        if layerShow and not suppressBearLabel
+            typ = isCHoCH ? "CHoCH" : "BOS"
+            showThisBreak = isCHoCH ? showCHoCH : showBOS
+            if showThisBreak
+                f_draw_break(typ, -1, isInternal, state.plBar, bar_index, state.pl)
+        state.bearBreakNow      := true
+        state.bearBreakLevelBar := state.plBar
+        state.bias := -1
+        state.pl   := na
+
+// 4.7 Per-bar updates — swing runs FIRST so internal can read its break flags.
+// Internal layer passes swgStruct break flags as suppress params: when swing
+// draws a BOS/CHoCH, internal skips drawing iBOS/iCHoCH at the same bar.
+f_update_structure(swgStruct, swgPivotH, swgPivotL, swgRightBars, false, false, false)
+f_update_structure(intStruct, intPivotH, intPivotL, intRightBars, true,
+                   swgStruct.bullBreakNow, swgStruct.bearBreakNow)
+
+// 4.8 Fractal markers — proper Williams Fractal appearance via plotshape.
+// plotshape(shape.triangledown/up) renders a solid filled triangle icon,
+// identical to TradingView's built-in Williams Fractals indicator.
+// offset=-rightBars places the shape back at the confirmed pivot bar.
+// Swing layer = size.small; internal layer = size.tiny (visually subordinate).
+// All four are gated by showSwingPoints so one toggle controls all markers.
+plotshape(showStructure and showSwing    and showSwingPoints and htfPass and not na(swgPivotH),
+          style=shape.triangledown, location=location.abovebar,
+          offset=-swgRightBars, color=bearColor, size=size.small,
+          title="Swing High Fractal",    display=display.pane)
+plotshape(showStructure and showSwing    and showSwingPoints and htfPass and not na(swgPivotL),
+          style=shape.triangleup,   location=location.belowbar,
+          offset=-swgRightBars, color=bullColor, size=size.small,
+          title="Swing Low Fractal",     display=display.pane)
+plotshape(showStructure and showInternal and showSwingPoints and htfPass and not na(intPivotH),
+          style=shape.triangledown, location=location.abovebar,
+          offset=-intRightBars, color=bearColor, size=size.tiny,
+          title="Internal High Fractal", display=display.pane)
+plotshape(showStructure and showInternal and showSwingPoints and htfPass and not na(intPivotL),
+          style=shape.triangleup,   location=location.belowbar,
+          offset=-intRightBars, color=bullColor, size=size.tiny,
+          title="Internal Low Fractal",  display=display.pane)
+
+
+//=============================================================================
+// SECTION 5 — ORDER BLOCK ENGINE (OBs + BREAKER BLOCKS)
+//=============================================================================
+// OBs are spawned from swing-level structure breaks (swgStruct.bullBreakNow /
+// bearBreakNow). For a bullish break, the OB is the last bearish candle
+// preceding the break; the zone runs from that candle's open (top) down to
+// its low (bottom). Mirror for bearish.
+//
+// Lifecycle:
+//   active OB  →  mitigated (close past 50% midline) → breaker (role flips, dashed border)
+//   breaker    →  invalidated (close past zone's far extreme) → deleted
+//
+// Cap: maxOBs active OBs per side. Oldest active is array.shift'd off when
+// a new OB pushes us over.
+
+// 5.1 OB / breaker zone state
+type OBZone
+    box   bx
+    label lbl
+    float top
+    float bottom
+    int   originBar      // bar_index of the OB candle
+    bool  origBull       // original direction (true = was bullish OB)
+
+var array<OBZone> activeBullOBs = array.new<OBZone>()
+var array<OBZone> activeBearOBs = array.new<OBZone>()
+var array<OBZone> bullBreakers  = array.new<OBZone>()  // from mitigated bearish OBs
+var array<OBZone> bearBreakers  = array.new<OBZone>()  // from mitigated bullish OBs
+
+OB_SCAN_LOOKBACK = 50  // how far back to scan for the OB candle
+
+// 5.2 Find the OB candle's offset from the current bar
+//   isBullishOB = true  → look for last bearish candle (close < open)
+//   isBullishOB = false → look for last bullish candle (close > open)
+// Returns offset in bars (1..OB_SCAN_LOOKBACK) or 0 if none found.
+f_find_ob_offset(bool isBullishOB) =>
+    int found = 0
+    for i = 1 to OB_SCAN_LOOKBACK
+        candleBearish = close[i] < open[i]
+        match = isBullishOB ? candleBearish : not candleBearish
+        if match and found == 0
+            found := i
+    found
+
+// 5.3 Render a zone (active OB or breaker)
+//   role = 0: active bullish OB (green, solid border, "OB")
+//   role = 1: active bearish OB (red,   solid border, "OB")
+//   role = 2: bullish breaker  (green, dashed border, "BB")  — from mitigated bear OB
+//   role = 3: bearish breaker  (red,   dashed border, "BB")  — from mitigated bull OB
+f_render_zone_visuals(OBZone z, int role) =>
+    isBullRole = role == 0 or role == 2
+    isBreaker  = role == 2 or role == 3
+    fillColor  = isBullRole ? bullOBColor : bearOBColor
+    bord       = isBreaker  ? line.style_dashed : line.style_solid
+    txt        = isBreaker  ? "BB" : "OB"
+
+    if not na(z.bx)
+        box.set_bgcolor(z.bx,      f_alpha(fillColor, obTransp))
+        box.set_border_color(z.bx, f_alpha(fillColor, math.max(obTransp - 30, 0)))
+        box.set_border_style(z.bx, bord)
+
+    if not na(z.lbl)
+        if showOBLabels
+            label.set_text(z.lbl, txt)
+            label.set_textcolor(z.lbl, fillColor)
+            label.set_color(z.lbl, color.new(color.white, 100))
+        else
+            label.set_text(z.lbl, "")
+
+// 5.4 Create a new OB from a swing break event
+f_create_ob(bool isBullish) =>
+    int obOffset = f_find_ob_offset(isBullish)
+    if obOffset > 0
+        obBar = bar_index - obOffset
+        topPx    = isBullish ? open[obOffset]  : high[obOffset]
+        bottomPx = isBullish ? low[obOffset]   : open[obOffset]
+
+        z = OBZone.new(na, na, topPx, bottomPx, obBar, isBullish)
+        tmpBox = box.new(obBar, topPx, bar_index, bottomPx,
+             bgcolor      = f_alpha(isBullish ? bullOBColor : bearOBColor, obTransp),
+             border_color = f_alpha(isBullish ? bullOBColor : bearOBColor, math.max(obTransp - 30, 0)),
+             border_style = line.style_solid,
+             xloc         = xloc.bar_index)
+        z.bx := tmpBox
+        tmpLbl = label.new(bar_index, isBullish ? topPx : bottomPx,
+             showOBLabels ? "OB" : "",
+             style     = isBullish ? label.style_label_left : label.style_label_left,
+             color     = color.new(color.white, 100),
+             textcolor = isBullish ? bullOBColor : bearOBColor,
+             size      = size.tiny,
+             xloc      = xloc.bar_index,
+             tooltip   = "Order Block — institutional supply/demand zone. Becomes a Breaker Block when mitigated.")
+        z.lbl := tmpLbl
+
+        targetArr = isBullish ? activeBullOBs : activeBearOBs
+        array.push(targetArr, z)
+
+        // Cap to maxOBs — drop oldest active on this side
+        while array.size(targetArr) > maxOBs
+            old = array.shift(targetArr)
+            if not na(old.bx)
+                box.delete(old.bx)
+            if not na(old.lbl)
+                label.delete(old.lbl)
+
+// 5.5 Tear down a zone's draws and return whether to keep referencing it
+f_delete_zone(OBZone z) =>
+    if not na(z.bx)
+        box.delete(z.bx)
+    if not na(z.lbl)
+        label.delete(z.lbl)
+
+// 5.6 Iterate active OBs of one direction → check for mitigation, convert to breaker
+f_check_active_obs(array<OBZone> activeArr, array<OBZone> breakerArr, bool isBullish) =>
+    int i = 0
+    _step = 0
+    while i < array.size(activeArr)
+        z = array.get(activeArr, i)
+        midline = (z.top + z.bottom) / 2
+        // Bullish OB mitigated when close < midline
+        // Bearish OB mitigated when close > midline
+        mitigated = isBullish ? (close < midline) : (close > midline)
+
+        // Pine v6 CE10235: every branch of this if/else (and its inner if/else)
+        // must return the same type. The shared `_step` sentinel makes the
+        // construct evaluate to int consistently.
+        if mitigated
+            array.remove(activeArr, i)
+            if showBreakers and showOBs
+                // Convert: bullish OB → bearish breaker (role 3); bearish OB → bullish breaker (role 2)
+                breakerRole = isBullish ? 3 : 2
+                f_render_zone_visuals(z, breakerRole)
+                array.push(breakerArr, z)
+                _step := 1
+            else
+                f_delete_zone(z)
+                _step := 2
+        else
+            // Extend right edge and refresh label text so the showOBLabels toggle is live.
+            if not na(z.bx)
+                box.set_right(z.bx, bar_index)
+            if not na(z.lbl)
+                label.set_x(z.lbl, bar_index)
+                label.set_text(z.lbl, showOBLabels ? "OB" : "")
+            i += 1
+            _step := 3
+
+// 5.7 Iterate breakers of one role → check for invalidation, delete if so
+//   isBullishBreaker = true  → invalidated when close < zone bottom
+//   isBullishBreaker = false → invalidated when close > zone top
+f_check_breakers(array<OBZone> breakerArr, bool isBullishBreaker) =>
+    int i = 0
+    _step = 0
+    while i < array.size(breakerArr)
+        z = array.get(breakerArr, i)
+        invalid = isBullishBreaker ? (close < z.bottom) : (close > z.top)
+        // Pine v6 CE10235: align both if/else branches' return types via sentinel.
+        if invalid
+            f_delete_zone(z)
+            array.remove(breakerArr, i)
+            _step := 1
+        else
+            if not na(z.bx)
+                box.set_right(z.bx, bar_index)
+            if not na(z.lbl)
+                label.set_x(z.lbl, bar_index)
+                label.set_text(z.lbl, showOBLabels ? "BB" : "")
+            i += 1
+            _step := 2
+
+// 5.8 Master cleanup when showOBs is false
+f_clear_zones(array<OBZone> arr) =>
+    while array.size(arr) > 0
+        z = array.shift(arr)
+        f_delete_zone(z)
+
+// 5.9 Per-bar dispatch
+if not showOBs
+    f_clear_zones(activeBullOBs)
+    f_clear_zones(activeBearOBs)
+    f_clear_zones(bullBreakers)
+    f_clear_zones(bearBreakers)
+else
+    // 1) Spawn new OBs from swing breaks (only if direction is enabled)
+    if swgStruct.bullBreakNow and showBullOB
+        f_create_ob(true)
+    if swgStruct.bearBreakNow and showBearOB
+        f_create_ob(false)
+
+    // 2) Update active OBs — check mitigation, extend boxes
+    f_check_active_obs(activeBullOBs, bearBreakers, true)
+    f_check_active_obs(activeBearOBs, bullBreakers, false)
+
+    // 3) Update breakers — check invalidation, extend boxes
+    if showBreakers
+        f_check_breakers(bullBreakers, true)
+        f_check_breakers(bearBreakers, false)
+    else
+        f_clear_zones(bullBreakers)
+        f_clear_zones(bearBreakers)
+
+
+//=============================================================================
+// SECTION 6 — FVG ENGINE (FVG + iFVG + CE)
+//=============================================================================
+// 3-candle imbalance detection on every confirmed bar:
+//   bullish: low > high[2]   → zone [high[2], low]
+//   bearish: high < low[2]   → zone [high, low[2]]
+// Auto-threshold filter: zone size must be ≥ ta.atr(14) * minFVGSize.
+//
+// Lifecycle:
+//   phase 0 (active)     → unmitigated, original color
+//   phase 1 (partial)    → price entered zone but hasn't crossed CE
+//   phase 2 (mitigated)  → close past CE midline
+//   phase 3 (inverted)   → close past far extreme → flips role to iFVG
+//
+// CE line is dotted, drawn at the 50% midline.
+
+// 6.1 FVG state
+type FVG
+    box   bx
+    line  ceLine
+    label lbl
+    float top
+    float bottom
+    int   originBar
+    int   phase = 0      // 0 active, 1 partial, 2 mitigated, 3 inverted (iFVG)
+    bool  origBull = true
+
+var array<FVG> fvgs = array.new<FVG>()
+
+// 6.2 Detection inputs (recomputed every bar)
+fvgATR        = ta.atr(14)
+isBullFVG     = low > high[2]
+isBearFVG     = high < low[2]
+bullFVGSize   = low - high[2]
+bearFVGSize   = low[2] - high
+minFVGSizePx  = fvgATR * minFVGSize
+
+// 6.3 Create a new FVG and push it into the array (oldest auto-evicted by cap)
+f_create_fvg(bool isBullish, float topPx, float bottomPx) =>
+    fillColor = isBullish ? bullFVGColor : bearFVGColor
+    midPx     = (topPx + bottomPx) / 2
+
+    bx = box.new(bar_index - 2, topPx, bar_index, bottomPx,
+         bgcolor      = f_alpha(fillColor, fvgTransp),
+         border_color = f_alpha(fillColor, math.max(fvgTransp - 30, 0)),
+         xloc         = xloc.bar_index)
+
+    ceLine = line.new(bar_index - 2, midPx, bar_index, midPx,
+         color = fillColor,
+         style = line.style_dotted,
+         xloc  = xloc.bar_index)
+
+    lbl = label.new(bar_index, midPx, "",
+         style     = label.style_label_right,
+         color     = color.new(color.white, 100),
+         textcolor = fillColor,
+         size      = size.tiny,
+         xloc      = xloc.bar_index)
+
+    f = FVG.new(bx, ceLine, lbl, topPx, bottomPx, bar_index - 2, 0, isBullish)
+    array.push(fvgs, f)
+
+    // Cap visible FVGs — drop oldest off the front
+    while array.size(fvgs) > maxFVGs
+        old = array.shift(fvgs)
+        if not na(old.bx)
+            box.delete(old.bx)
+        if not na(old.ceLine)
+            line.delete(old.ceLine)
+        if not na(old.lbl)
+            label.delete(old.lbl)
+
+// 6.4 Phase-machine for one FVG. Phases are monotonic (only forward).
+//   0 active → 1 partial (entered zone) → 2 mitigated (CE crossed)
+//   → 3 inverted (full break, now iFVG) → 4 iFVG invalidated (price reclaimed zone)
+f_update_fvg(FVG f) =>
+    midline = (f.top + f.bottom) / 2
+
+    if f.origBull
+        // Bullish FVG: zone is below current price after formation, acts as support.
+        if f.phase == 0 and low <= f.top
+            f.phase := 1
+        if f.phase == 1 and close < midline
+            f.phase := 2
+        if f.phase == 2 and close < f.bottom
+            f.phase := 3
+        // bearish iFVG (was bullish FVG) — invalidated when price closes back above the zone
+        if f.phase == 3 and close > f.top
+            f.phase := 4
+    else
+        // Bearish FVG: zone above current price, acts as resistance.
+        if f.phase == 0 and high >= f.bottom
+            f.phase := 1
+        if f.phase == 1 and close > midline
+            f.phase := 2
+        if f.phase == 2 and close > f.top
+            f.phase := 3
+        // bullish iFVG (was bearish FVG) — invalidated when price closes back below the zone
+        if f.phase == 3 and close < f.bottom
+            f.phase := 4
+
+// 6.5 Render an FVG given its current phase + visibility toggles
+f_render_fvg(FVG f) =>
+    isInverted  = f.phase == 3
+    isMitigated = f.phase == 2
+
+    fillColor = isInverted ? (f.origBull ? iFVGBearColor : iFVGBullColor) : (f.origBull ? bullFVGColor : bearFVGColor)
+
+    showThisFvg = if isInverted
+        showIFVG
+    else if isMitigated
+        showMitigatedFVG
+    else
+        f.origBull ? showBullFVG : showBearFVG
+
+    fillTransp   = showThisFvg ? fvgTransp : 100
+    borderTransp = showThisFvg ? math.max(fvgTransp - 30, 0) : 100
+
+    if not na(f.bx)
+        box.set_bgcolor(f.bx,      f_alpha(fillColor, fillTransp))
+        box.set_border_color(f.bx, f_alpha(fillColor, borderTransp))
+        box.set_right(f.bx, bar_index)
+
+    if not na(f.ceLine)
+        ceVisible = showCE and showThisFvg and not isInverted
+        line.set_color(f.ceLine, ceVisible ? fillColor : f_alpha(fillColor, 100))
+        line.set_x2(f.ceLine, bar_index)
+
+    if not na(f.lbl)
+        // Label shows "FVG" for active/partial/mitigated and "iFVG" once the
+        // zone has flipped. Previous behavior left active-phase FVGs label-less,
+        // which made the cream zones nearly invisible against the chart.
+        lblText = if not showThisFvg
+            ""
+        else
+            isInverted ? "iFVG" : "FVG"
+        label.set_x(f.lbl, bar_index)
+        label.set_text(f.lbl, lblText)
+        label.set_textcolor(f.lbl, fillColor)
+
+// 6.6 Per-bar dispatch (and event tracking for Phase 13 alerts)
+fvgTouchEvent = false   // declared at top-level so Phase 13 can read it
+
+if not showFVGs
+    while array.size(fvgs) > 0
+        old = array.shift(fvgs)
+        if not na(old.bx)
+            box.delete(old.bx)
+        if not na(old.ceLine)
+            line.delete(old.ceLine)
+        if not na(old.lbl)
+            label.delete(old.lbl)
+else
+    if isBullFVG and showBullFVG and bullFVGSize >= minFVGSizePx
+        f_create_fvg(true, low, high[2])
+    if isBearFVG and showBearFVG and bearFVGSize >= minFVGSizePx
+        f_create_fvg(false, low[2], high)
+
+    int i = 0
+    while i < array.size(fvgs)
+        f = array.get(fvgs, i)
+        prevPhase = f.phase
+        f_update_fvg(f)
+        if prevPhase == 0 and f.phase == 1
+            fvgTouchEvent := true
+        // Delete FVGs that should no longer be on the chart:
+        //   phase 2 (mitigated) when user has Show Mitigated FVGs off
+        //   phase 4 (iFVG invalidated) — always
+        deleteFvg = (f.phase == 2 and not showMitigatedFVG) or f.phase == 4
+        if deleteFvg
+            if not na(f.bx)
+                box.delete(f.bx)
+            if not na(f.ceLine)
+                line.delete(f.ceLine)
+            if not na(f.lbl)
+                label.delete(f.lbl)
+            array.remove(fvgs, i)
+        else
+            f_render_fvg(f)
+            i += 1
+
+
+//=============================================================================
+// SECTION 7 — LIQUIDITY ENGINE (EQH/EQL + SWEEPS + IDM)
+//=============================================================================
+// EQH/EQL: two+ swing highs (or lows) within tolerance form a horizontal
+// liquidity line. New same-direction swings within tolerance EXTEND an
+// existing line rather than creating a duplicate.
+//
+// Sweep: wick passes through the level but the bar closes back on the
+// origin side → "SWEEP" label, line recolors to swept gray.
+//
+// IDM (Inducements): the current unbroken INTERNAL pivot high/low (from
+// Phase 3's intStruct) drawn as a dotted line. Cleared when the pivot is
+// consumed by a break.
+
+// 7.1 Tolerance — ATR-based by default so EQH/EQL pair on every instrument
+// (including indices, where the legacy 10-pip default = 2.5 NAS100 points
+// was so tight nothing ever paired). User can opt back into pips via the
+// eqToleranceMode input.
+liqAtr         = ta.atr(14)
+liqPipSize     = syminfo.mintick * (syminfo.mintick <= 0.001 ? 10 : 1)
+liqTolerancePx = eqToleranceMode == "Auto (ATR)" ? liqAtr * eqToleranceATR : liqPipSize * eqTolerance
+
+// 7.2 Recent swing history (used to find matching pivots)
+type SwingHist
+    float price = na
+    int   bar   = na
+    bool  isHigh = true
+
+var array<SwingHist> swingHistory = array.new<SwingHist>()
+LIQ_HISTORY_SIZE = 30
+
+// 7.3 EQ level state
+type EQLevel
+    line  ln
+    label lbl
+    float price
+    int   bar1
+    int   bar2
+    bool  isHigh
+    bool  swept
+
+var array<EQLevel> eqLevels = array.new<EQLevel>()
+LIQ_MAX_LEVELS = 10
+
+// 7.4 Push a new swing onto history, drop oldest if over capacity
+f_add_swing(float swPrice, int swBar, bool isHigh) =>
+    array.push(swingHistory, SwingHist.new(swPrice, swBar, isHigh))
+    while array.size(swingHistory) > LIQ_HISTORY_SIZE
+        SwingHist _dropped = array.shift(swingHistory)
+
+// 7.5 New swing → either extend an existing EQ line or create a new one
+f_check_eq_match(float newPrice, int newBar, bool isHigh) =>
+    if showLiq and (isHigh ? showEQH : showEQL)
+        // Try to extend an existing live EQ level first
+        bool extended = false
+        int j = 0
+        while j < array.size(eqLevels) and not extended
+            eq = array.get(eqLevels, j)
+            sameDir   = eq.isHigh == isHigh
+            withinTol = math.abs(eq.price - newPrice) <= liqTolerancePx
+            if sameDir and not eq.swept and withinTol
+                if not na(eq.ln)
+                    line.set_x2(eq.ln, newBar)
+                eq.bar2 := newBar
+                extended := true
+            j += 1
+
+        // Otherwise scan the last ~10 swings of history for a new pair
+        if not extended
+            int n = array.size(swingHistory) - 1
+            int i = n - 1
+            int lowerBound = math.max(0, n - 10)
+            bool found = false
+            while i >= lowerBound and not found
+                sh = array.get(swingHistory, i)
+                if sh.isHigh == isHigh and math.abs(sh.price - newPrice) <= liqTolerancePx
+                    levelPrice = (sh.price + newPrice) / 2
+                    levelColor = isHigh ? eqhColor : eqlColor
+                    ln = line.new(sh.bar, levelPrice, f_right_anchor(), levelPrice,
+                         color = levelColor,
+                         style = line.style_solid,
+                         width = 1,
+                         xloc  = xloc.bar_index)
+                    // Label sits at the right anchor (a few bars past the last
+                    // candle) and uses label.style_label_left so the box sits
+                    // to the left of its anchor, hugging the line's right end.
+                    lbl = label.new(f_right_anchor(), levelPrice, isHigh ? "EQH" : "EQL",
+                         style     = label.style_label_left,
+                         color     = color.new(color.white, 100),
+                         textcolor = levelColor,
+                         size      = size.tiny,
+                         xloc      = xloc.bar_index)
+                    eq = EQLevel.new(ln, lbl, levelPrice, sh.bar, newBar, isHigh, false)
+                    array.push(eqLevels, eq)
+
+                    while array.size(eqLevels) > LIQ_MAX_LEVELS
+                        EQLevel old = array.shift(eqLevels)
+                        if not na(old.ln)
+                            line.delete(old.ln)
+                        if not na(old.lbl)
+                            label.delete(old.lbl)
+
+                    found := true
+                i -= 1
+
+// 7.6 Sweep detection + label-position upkeep for live EQ levels.
+// Returns true if any new sweep happened on this bar (consumed by Phase 13).
+f_update_eq_levels() =>
+    int i = 0
+    bool anySwept = false
+    while i < array.size(eqLevels)
+        eq = array.get(eqLevels, i)
+
+        if not eq.swept
+            sweptNow = eq.isHigh ? (high > eq.price and close < eq.price) : (low < eq.price and close > eq.price)
+            if sweptNow
+                eq.swept := true
+                anySwept := true
+                if showSweeps
+                    label.new(bar_index, eq.price, "SWEEP",
+                         style     = eq.isHigh ? label.style_label_down : label.style_label_up,
+                         color     = color.new(color.white, 100),
+                         textcolor = sweptColor,
+                         size      = size.small,
+                         xloc      = xloc.bar_index)
+                if not na(eq.ln)
+                    line.set_color(eq.ln, sweptColor)
+                if not na(eq.lbl)
+                    label.set_textcolor(eq.lbl, sweptColor)
+
+        if not na(eq.ln)
+            // Keep the live edge tracking the right anchor every bar so the
+            // line grows with the chart instead of stalling at its origin bar.
+            line.set_x2(eq.ln, f_right_anchor())
+        if not na(eq.lbl)
+            label.set_x(eq.lbl, f_right_anchor())
+
+        i += 1
+    anySwept
+
+// 7.7 IDM lines that mirror the current unbroken internal pivots.
+// Pine v6 forbids functions from modifying global vars, so all updates
+// are inlined in the dispatch below.
+var line  idmHighLine = na
+var line  idmLowLine  = na
+var label idmHighLbl  = na
+var label idmLowLbl   = na
+
+// 7.8 Per-bar dispatch (and event tracking for Phase 13 alerts)
+liqSweepEvent = false
+
+if not showLiq
+    while array.size(eqLevels) > 0
+        EQLevel old = array.shift(eqLevels)
+        if not na(old.ln)
+            line.delete(old.ln)
+        if not na(old.lbl)
+            label.delete(old.lbl)
+else
+    if not na(swgPivotH)
+        f_add_swing(swgPivotH, bar_index - swgRightBars, true)
+        f_check_eq_match(swgPivotH, bar_index - swgRightBars, true)
+    if not na(swgPivotL)
+        f_add_swing(swgPivotL, bar_index - swgRightBars, false)
+        f_check_eq_match(swgPivotL, bar_index - swgRightBars, false)
+    liqSweepEvent := f_update_eq_levels()
+
+// 7.9 IDM update — fully inlined (touches global var lines/labels).
+// Each branch ends with `int _step := N` so the if/else has consistent return
+// type and Pine doesn't trip CE10235 on the label-vs-void mismatch.
+idmEnabled = showLiq and showIDM
+
+// High-side IDM
+_idmHighStep = 0
+if idmEnabled and not na(intStruct.ph)
+    if na(idmHighLine)
+        idmHighLine := line.new(intStruct.phBar, intStruct.ph, f_right_anchor(), intStruct.ph,
+             color = eqhColor,
+             style = line.style_dotted,
+             xloc  = xloc.bar_index)
+        idmHighLbl := label.new(f_right_anchor(), intStruct.ph, "IDM",
+             style     = label.style_label_left,
+             color     = color.new(color.white, 100),
+             textcolor = eqhColor,
+             size      = size.tiny,
+             xloc      = xloc.bar_index,
+             tooltip   = "Inducement — minor swing point used as a liquidity trap before a larger move.")
+        _idmHighStep := 1
+    else
+        line.set_x1(idmHighLine, intStruct.phBar)
+        line.set_y1(idmHighLine, intStruct.ph)
+        line.set_y2(idmHighLine, intStruct.ph)
+        line.set_x2(idmHighLine, f_right_anchor())
+        if not na(idmHighLbl)
+            label.set_xy(idmHighLbl, f_right_anchor(), intStruct.ph)
+        _idmHighStep := 2
+else
+    if not na(idmHighLine)
+        line.delete(idmHighLine)
+        idmHighLine := na
+    if not na(idmHighLbl)
+        label.delete(idmHighLbl)
+        idmHighLbl := na
+    _idmHighStep := 3
+
+// Low-side IDM (mirror)
+_idmLowStep = 0
+if idmEnabled and not na(intStruct.pl)
+    if na(idmLowLine)
+        idmLowLine := line.new(intStruct.plBar, intStruct.pl, f_right_anchor(), intStruct.pl,
+             color = eqlColor,
+             style = line.style_dotted,
+             xloc  = xloc.bar_index)
+        idmLowLbl := label.new(f_right_anchor(), intStruct.pl, "IDM",
+             style     = label.style_label_left,
+             color     = color.new(color.white, 100),
+             textcolor = eqlColor,
+             size      = size.tiny,
+             xloc      = xloc.bar_index,
+             tooltip   = "Inducement — minor swing point used as a liquidity trap before a larger move.")
+        _idmLowStep := 1
+    else
+        line.set_x1(idmLowLine, intStruct.plBar)
+        line.set_y1(idmLowLine, intStruct.pl)
+        line.set_y2(idmLowLine, intStruct.pl)
+        line.set_x2(idmLowLine, f_right_anchor())
+        if not na(idmLowLbl)
+            label.set_xy(idmLowLbl, f_right_anchor(), intStruct.pl)
+        _idmLowStep := 2
+else
+    if not na(idmLowLine)
+        line.delete(idmLowLine)
+        idmLowLine := na
+    if not na(idmLowLbl)
+        label.delete(idmLowLbl)
+        idmLowLbl := na
+    _idmLowStep := 3
+
+
+//=============================================================================
+// SECTION 8 — PREMIUM / DISCOUNT ENGINE
+//=============================================================================
+// Range = current swing high to current swing low. EQ at the midpoint.
+// Premium = upper half (light red); Discount = lower half (light green).
+// % readout label shows position 0-100% of the range.
+
+// 8.1 Track most recent swing pivots (regardless of break status — we need
+// both endpoints of the range, even if one has been broken).
+var float pdSwgH    = na
+var float pdSwgL    = na
+var int   pdSwgHBar = na
+var int   pdSwgLBar = na
+
+if not na(swgPivotH)
+    pdSwgH    := swgPivotH
+    pdSwgHBar := bar_index - swgRightBars
+if not na(swgPivotL)
+    pdSwgL    := swgPivotL
+    pdSwgLBar := bar_index - swgRightBars
+
+// 8.2 Single-instance drawing objects (repositioned, not recreated, each bar)
+var box   pdPremiumBox  = na
+var box   pdDiscountBox = na
+var line  pdEqLine      = na
+var label pdEqLabel     = na
+var label pdPctLabel    = na
+
+// 8.3 Per-bar update — clear logic inlined (Pine v6 forbids global mutation in functions)
+if not showPD or na(pdSwgH) or na(pdSwgL) or pdSwgH <= pdSwgL
+    if not na(pdPremiumBox)
+        box.delete(pdPremiumBox)
+        pdPremiumBox := na
+    if not na(pdDiscountBox)
+        box.delete(pdDiscountBox)
+        pdDiscountBox := na
+    if not na(pdEqLine)
+        line.delete(pdEqLine)
+        pdEqLine := na
+    if not na(pdEqLabel)
+        label.delete(pdEqLabel)
+        pdEqLabel := na
+    if not na(pdPctLabel)
+        label.delete(pdPctLabel)
+        pdPctLabel := na
+else
+    eqPx        = (pdSwgH + pdSwgL) / 2
+    rangeSize   = pdSwgH - pdSwgL
+    pricePosPct = (close - pdSwgL) / rangeSize * 100
+    rangeLeft   = math.min(pdSwgHBar, pdSwgLBar)
+
+    // Premium / Discount shading — int sentinel aligns branch return types
+    if showZoneShading
+        _pdShadeStep = 0
+        if na(pdPremiumBox)
+            pdPremiumBox := box.new(rangeLeft, pdSwgH, bar_index, eqPx,
+                 bgcolor      = f_alpha(premColor, zoneTransp),
+                 border_color = color.new(color.white, 100),
+                 xloc         = xloc.bar_index)
+            _pdShadeStep := 1
+        else
+            box.set_left(pdPremiumBox,   rangeLeft)
+            box.set_top(pdPremiumBox,    pdSwgH)
+            box.set_bottom(pdPremiumBox, eqPx)
+            box.set_right(pdPremiumBox,  bar_index)
+            box.set_bgcolor(pdPremiumBox, f_alpha(premColor, zoneTransp))
+            _pdShadeStep := 2
+
+        if na(pdDiscountBox)
+            pdDiscountBox := box.new(rangeLeft, eqPx, bar_index, pdSwgL,
+                 bgcolor      = f_alpha(discColor, zoneTransp),
+                 border_color = color.new(color.white, 100),
+                 xloc         = xloc.bar_index)
+            _pdShadeStep := 3
+        else
+            box.set_left(pdDiscountBox,   rangeLeft)
+            box.set_top(pdDiscountBox,    eqPx)
+            box.set_bottom(pdDiscountBox, pdSwgL)
+            box.set_right(pdDiscountBox,  bar_index)
+            box.set_bgcolor(pdDiscountBox, f_alpha(discColor, zoneTransp))
+            _pdShadeStep := 4
+    else
+        if not na(pdPremiumBox)
+            box.delete(pdPremiumBox)
+            pdPremiumBox := na
+        if not na(pdDiscountBox)
+            box.delete(pdDiscountBox)
+            pdDiscountBox := na
+
+    // EQ line — int sentinel makes both branches return int (CE10235 alignment)
+    if showEQ
+        _pdEqStep = 0
+        if na(pdEqLine)
+            pdEqLine := line.new(rangeLeft, eqPx, f_right_anchor(), eqPx,
+                 color = eqColor,
+                 style = line.style_solid,
+                 width = 1,
+                 xloc  = xloc.bar_index)
+            pdEqLabel := label.new(f_right_anchor(), eqPx, "EQ",
+                 style     = label.style_label_left,
+                 color     = color.new(color.white, 100),
+                 textcolor = eqColor,
+                 size      = size.tiny,
+                 xloc      = xloc.bar_index,
+                 tooltip   = "Equilibrium — 50% of the current swing range. Premium above, discount below.")
+            _pdEqStep := 1
+        else
+            line.set_x1(pdEqLine, rangeLeft)
+            line.set_y1(pdEqLine, eqPx)
+            line.set_y2(pdEqLine, eqPx)
+            line.set_x2(pdEqLine, f_right_anchor())
+            line.set_color(pdEqLine, eqColor)
+            if not na(pdEqLabel)
+                label.set_xy(pdEqLabel, f_right_anchor(), eqPx)
+                label.set_textcolor(pdEqLabel, eqColor)
+            _pdEqStep := 2
+    else
+        if not na(pdEqLine)
+            line.delete(pdEqLine)
+            pdEqLine := na
+        if not na(pdEqLabel)
+            label.delete(pdEqLabel)
+            pdEqLabel := na
+
+    // % readout — anchored to whichever extreme price is closer to
+    if showPctReadout
+        inPremium    = pricePosPct >= 50
+        zoneText     = str.tostring(pricePosPct, "0.0") + (inPremium ? "% Prem" : "% Disc")
+        zoneTxtColor = inPremium ? premColor : discColor
+        labelY       = inPremium ? pdSwgH : pdSwgL
+        labelStyle   = inPremium ? label.style_label_down : label.style_label_up
+
+        _pdPctStep = 0
+        if na(pdPctLabel)
+            pdPctLabel := label.new(bar_index, labelY, zoneText,
+                 style     = labelStyle,
+                 color     = color.new(color.white, 100),
+                 textcolor = zoneTxtColor,
+                 size      = size.small,
+                 xloc      = xloc.bar_index)
+            _pdPctStep := 1
+        else
+            label.set_xy(pdPctLabel, bar_index, labelY)
+            label.set_text(pdPctLabel, zoneText)
+            label.set_textcolor(pdPctLabel, zoneTxtColor)
+            label.set_style(pdPctLabel, labelStyle)
+            _pdPctStep := 2
+    else
+        if not na(pdPctLabel)
+            label.delete(pdPctLabel)
+            pdPctLabel := na
+
+
+//=============================================================================
+// SECTION 9 — KEY LEVELS ENGINE
+//=============================================================================
+// Plots PDH/PDL, PWH/PWL, PMH/PML, Monday H/L, and NY-Midnight-Open as
+// horizontal reference lines that stop at f_right_anchor() — a few bars past
+// the live edge — with a label hugging the right end. No extend.right.
+//
+// Three security calls (D / W / M) — within the 8-call budget for the Free
+// version. Monday H/L and NY Midnight Open are tracked locally from the
+// chart's bars (no extra security call).
+
+// 9.1 HTF prior-period highs/lows via tuple security calls
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]],
+     lookahead = barmerge.lookahead_off)
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]],
+     lookahead = barmerge.lookahead_off)
+[pmh, pml] = request.security(syminfo.tickerid, "M", [high[1], low[1]],
+     lookahead = barmerge.lookahead_off)
+
+// 9.2 Monday H/L tracked locally
+var float curMonH  = na
+var float curMonL  = na
+var float lastMonH = na
+var float lastMonL = na
+
+isMon = dayofweek(time, "America/New_York") == dayofweek.monday
+
+if isMon
+    if na(curMonH)
+        curMonH := high
+        curMonL := low
+    else
+        curMonH := math.max(curMonH, high)
+        curMonL := math.min(curMonL, low)
+else
+    if not na(curMonH)
+        lastMonH := curMonH
+        lastMonL := curMonL
+        curMonH  := na
+        curMonL  := na
+
+mondayH = isMon ? curMonH : lastMonH
+mondayL = isMon ? curMonL : lastMonL
+
+// 9.3 NY Midnight Open — captured on the first bar of 00:00 EST
+var float nyMidOpen = na
+nyHr  = f_ny_hour()
+nyMn  = f_ny_minute()
+prevH = nz(nyHr[1], -1)
+prevM = nz(nyMn[1], -1)
+if nyHr == 0 and nyMn == 0 and (prevH != 0 or prevM != 0)
+    nyMidOpen := open
+
+// 9.4 KeyLevel pair (line + label) and a single render helper
+type KeyLevel
+    line  ln  = na
+    label lbl = na
+
+f_draw_level(KeyLevel kl, bool show, float price, color c, int wid, string sty, string txt) =>
+    // Pine v6 CE10235: every branch must return the same type. Each branch
+    // ends with `_step := N` so the if/else chain evaluates to int.
+    _step = 0
+    if not show or na(price)
+        if not na(kl.ln)
+            line.delete(kl.ln)
+            kl.ln := na
+        if not na(kl.lbl)
+            label.delete(kl.lbl)
+            kl.lbl := na
+        _step := 1
+    else
+        if na(kl.ln)
+            kl.ln := line.new(bar_index - 1, price, f_right_anchor(), price,
+                 color = c,
+                 width = wid,
+                 style = sty,
+                 xloc  = xloc.bar_index)
+            kl.lbl := label.new(f_right_anchor(), price, showLevelLabels ? txt : "",
+                 style     = label.style_label_left,
+                 color     = color.new(color.white, 100),
+                 textcolor = c,
+                 size      = size.tiny,
+                 xloc      = xloc.bar_index)
+            _step := 2
+        else
+            line.set_y1(kl.ln, price)
+            line.set_y2(kl.ln, price)
+            line.set_x2(kl.ln, f_right_anchor())
+            line.set_color(kl.ln, c)
+            line.set_style(kl.ln, sty)
+            line.set_width(kl.ln, wid)
+            if not na(kl.lbl)
+                label.set_xy(kl.lbl, f_right_anchor(), price)
+                label.set_text(kl.lbl, showLevelLabels ? txt : "")
+                label.set_textcolor(kl.lbl, c)
+            _step := 3
+
+// 9.5 KeyLevel instances
+var KeyLevel klPDH   = KeyLevel.new()
+var KeyLevel klPDL   = KeyLevel.new()
+var KeyLevel klPWH   = KeyLevel.new()
+var KeyLevel klPWL   = KeyLevel.new()
+var KeyLevel klPMH   = KeyLevel.new()
+var KeyLevel klPML   = KeyLevel.new()
+var KeyLevel klMonH  = KeyLevel.new()
+var KeyLevel klMonL  = KeyLevel.new()
+var KeyLevel klNYMid = KeyLevel.new()
+
+// 9.6 Per-bar dispatch
+levelsOn = showLevels
+
+f_draw_level(klPDH,   levelsOn and showPDH_PDL,    pdh,       dailyColor,   1, line.style_solid,  "PDH")
+f_draw_level(klPDL,   levelsOn and showPDH_PDL,    pdl,       dailyColor,   1, line.style_solid,  "PDL")
+f_draw_level(klPWH,   levelsOn and showPWH_PWL,    pwh,       weeklyColor,  2, line.style_solid,  "PWH")
+f_draw_level(klPWL,   levelsOn and showPWH_PWL,    pwl,       weeklyColor,  2, line.style_solid,  "PWL")
+f_draw_level(klPMH,   levelsOn and showPMH_PML,    pmh,       monthlyColor, 2, line.style_dashed, "PMH")
+f_draw_level(klPML,   levelsOn and showPMH_PML,    pml,       monthlyColor, 2, line.style_dashed, "PML")
+f_draw_level(klMonH,  levelsOn and showMonday,     mondayH,   dailyColor,   1, line.style_dotted, "MonH")
+f_draw_level(klMonL,  levelsOn and showMonday,     mondayL,   dailyColor,   1, line.style_dotted, "MonL")
+f_draw_level(klNYMid, levelsOn and showNYMidnight, nyMidOpen, dailyColor,   1, line.style_solid,  "NY Mid")
+
+
+//=============================================================================
+// SECTION 10 — CRT ENGINE (CANDLE RANGE THEORY)
+//=============================================================================
+// CRT candle = a candle that sweeps both the prior candle's high AND low.
+// Direction = sign of the candle body (close > open is bullish, close <
+// open is bearish).
+//
+// On detection, draw horizontal lines at the CRT candle's high and low
+// extending right. When price touches a line, that side stops extending
+// (line.set_extend(extend.none)) and the label freezes at the touch bar.
+
+// 10.1 CRT state
+type CRT
+    line  hiLine
+    line  loLine
+    label hiLbl
+    label loLbl
+    float hi
+    float lo
+    int   originBar
+    bool  isBullish
+    bool  hiTouched = false
+    bool  loTouched = false
+
+var array<CRT> crts = array.new<CRT>()
+CRT_MAX = 5
+
+// 10.2 Resolve user's line-style string to the Pine constant
+crtStyleConst = crtLineStyle == "Solid" ? line.style_solid : crtLineStyle == "Dotted" ? line.style_dotted : line.style_dashed
+
+// 10.3 Friendly TF tag for label text
+f_format_tf() =>
+    p = timeframe.period
+    p == "D" ? "D" : p == "W" ? "W" : p == "M" ? "M" : p == "1" ? "1m" : p == "5" ? "5m" : p == "15" ? "15m" : p == "30" ? "30m" : p == "60" ? "1H" : p == "240" ? "4H" : p
+
+// 10.4 Detection
+isBullishCRT = high > high[1] and low < low[1] and close > open
+isBearishCRT = high > high[1] and low < low[1] and close < open
+isCRT        = isBullishCRT or isBearishCRT
+
+// 10.5 Spawn a new CRT
+f_create_crt(bool isBullish) =>
+    crtColor = isBullish ? bullCRTColor : bearCRTColor
+    tfTag    = f_format_tf()
+    txt      = "CRT " + tfTag
+
+    hiLine = line.new(bar_index, high, f_right_anchor(), high,
+         color = crtColor,
+         style = crtStyleConst,
+         width = 1,
+         xloc  = xloc.bar_index)
+    loLine = line.new(bar_index, low, f_right_anchor(), low,
+         color = crtColor,
+         style = crtStyleConst,
+         width = 1,
+         xloc  = xloc.bar_index)
+    // Labels live at the right anchor (a few bars past the last candle) so
+    // they hug the right end of the line instead of getting buried in the
+    // CRT candle body. style_label_left sets the box on the left of its anchor.
+    hiLbl = label.new(f_right_anchor(), high, showCRTLabels ? txt : "",
+         style     = label.style_label_left,
+         color     = color.new(color.white, 100),
+         textcolor = crtColor,
+         size      = size.tiny,
+         xloc      = xloc.bar_index)
+    loLbl = label.new(f_right_anchor(), low, showCRTLabels ? txt : "",
+         style     = label.style_label_left,
+         color     = color.new(color.white, 100),
+         textcolor = crtColor,
+         size      = size.tiny,
+         xloc      = xloc.bar_index)
+
+    c = CRT.new(hiLine, loLine, hiLbl, loLbl, high, low, bar_index, isBullish, false, false)
+    array.push(crts, c)
+
+    while array.size(crts) > CRT_MAX
+        CRT old = array.shift(crts)
+        if not na(old.hiLine)
+            line.delete(old.hiLine)
+        if not na(old.loLine)
+            line.delete(old.loLine)
+        if not na(old.hiLbl)
+            label.delete(old.hiLbl)
+        if not na(old.loLbl)
+            label.delete(old.loLbl)
+
+// 10.6 Update one CRT — touch detection + live label/style refresh
+// Lines now stop at f_right_anchor() (no extend.right). Untouched sides have
+// their right edge pushed forward each bar; touched sides freeze at the touch.
+f_update_crt(CRT c) =>
+    // High side touch — freeze the right edge at the touch bar
+    if not c.hiTouched and high >= c.hi
+        c.hiTouched := true
+        if not na(c.hiLine)
+            line.set_x2(c.hiLine, bar_index)
+        if not na(c.hiLbl)
+            label.set_x(c.hiLbl, bar_index)
+
+    // Low side touch — mirror
+    if not c.loTouched and low <= c.lo
+        c.loTouched := true
+        if not na(c.loLine)
+            line.set_x2(c.loLine, bar_index)
+        if not na(c.loLbl)
+            label.set_x(c.loLbl, bar_index)
+
+    // Live updates for non-touched sides — push right edge forward and refresh
+    txt = "CRT " + f_format_tf()
+
+    if not na(c.hiLine)
+        line.set_style(c.hiLine, crtStyleConst)
+    if not na(c.loLine)
+        line.set_style(c.loLine, crtStyleConst)
+
+    if not c.hiTouched
+        if not na(c.hiLine)
+            line.set_x2(c.hiLine, f_right_anchor())
+        if not na(c.hiLbl)
+            label.set_x(c.hiLbl, f_right_anchor())
+            label.set_text(c.hiLbl, showCRTLabels ? txt : "")
+    if not c.loTouched
+        if not na(c.loLine)
+            line.set_x2(c.loLine, f_right_anchor())
+        if not na(c.loLbl)
+            label.set_x(c.loLbl, f_right_anchor())
+            label.set_text(c.loLbl, showCRTLabels ? txt : "")
+
+// 10.7 Per-bar dispatch
+// CRT is gated by both the showCRT toggle and the htfPass rule (15m+ when
+// htfOnly is on). When gated off, we tear down all live CRT draws so the
+// chart doesn't keep stale boxes.
+crtActive = showCRT and htfPass
+
+if not crtActive
+    while array.size(crts) > 0
+        CRT old = array.shift(crts)
+        if not na(old.hiLine)
+            line.delete(old.hiLine)
+        if not na(old.loLine)
+            line.delete(old.loLine)
+        if not na(old.hiLbl)
+            label.delete(old.hiLbl)
+        if not na(old.loLbl)
+            label.delete(old.loLbl)
+else
+    if isCRT
+        f_create_crt(isBullishCRT)
+
+    int i = 0
+    while i < array.size(crts)
+        c = array.get(crts, i)
+        f_update_crt(c)
+        i += 1
+
+
+//=============================================================================
+// SECTION 11 — ADR ENGINE (AVERAGE DAILY RANGE + JUDAS)
+//=============================================================================
+// One security call returns daily H/L/O plus the ADR (SMA of prior
+// adrPeriod daily ranges). Today's consumption = (dH - dL) / ADR × 100.
+//
+// Visuals:
+//   ADR projection (optional): dOpen ± ADR/2, solid
+//   Judas levels: nyMidOpen ± ADR/3, dotted
+//   Consumption % label: green <60%·threshold, yellow <threshold, red ≥threshold
+
+// 11.1 Daily data + ADR (single security call returning 4 values)
+[dHigh, dLow, dOpen, adrVal] = request.security(syminfo.tickerid, "D",
+     [high, low, open, ta.sma(high[1] - low[1], adrPeriod)],
+     lookahead = barmerge.lookahead_off)
+
+// 11.2 Consumption % and status color
+adrConsumption = na(adrVal) or adrVal == 0 ? 0.0 : (dHigh - dLow) / adrVal * 100
+adrLowerBound  = adrThreshold * 0.75
+adrConsumColor = adrConsumption >= adrThreshold ? color.red : adrConsumption >= adrLowerBound ? color.yellow : color.green
+
+// 11.3 Single-instance drawing objects
+var line  lnADRUp     = na
+var line  lnADRDown   = na
+var line  lnJudasUp   = na
+var line  lnJudasDown = na
+var label lblADRUp     = na
+var label lblADRDown   = na
+var label lblJudasUp   = na
+var label lblJudasDown = na
+var label lblConsum   = na
+
+// 11.4 Per-bar update — clear logic inlined (Pine v6 forbids global mutation in functions)
+if not showADR or na(adrVal)
+    if not na(lnADRUp)
+        line.delete(lnADRUp)
+        lnADRUp := na
+    if not na(lnADRDown)
+        line.delete(lnADRDown)
+        lnADRDown := na
+    if not na(lnJudasUp)
+        line.delete(lnJudasUp)
+        lnJudasUp := na
+    if not na(lnJudasDown)
+        line.delete(lnJudasDown)
+        lnJudasDown := na
+    if not na(lblADRUp)
+        label.delete(lblADRUp)
+        lblADRUp := na
+    if not na(lblADRDown)
+        label.delete(lblADRDown)
+        lblADRDown := na
+    if not na(lblJudasUp)
+        label.delete(lblJudasUp)
+        lblJudasUp := na
+    if not na(lblJudasDown)
+        label.delete(lblJudasDown)
+        lblJudasDown := na
+    if not na(lblConsum)
+        label.delete(lblConsum)
+        lblConsum := na
+else
+    // --- ADR Projection lines (optional) ---
+    adrHalf  = adrVal / 2
+    projUp   = dOpen + adrHalf
+    projDown = dOpen - adrHalf
+
+    if showADRProj
+        _adrProjStep = 0
+        if na(lnADRUp)
+            lnADRUp := line.new(bar_index - 1, projUp, f_right_anchor(), projUp,
+                 color = adrColor, width = 1, style = line.style_solid, xloc = xloc.bar_index)
+            lnADRDown := line.new(bar_index - 1, projDown, f_right_anchor(), projDown,
+                 color = adrColor, width = 1, style = line.style_solid, xloc = xloc.bar_index)
+            lblADRUp := label.new(f_right_anchor(), projUp, "ADR+",
+                 style = label.style_label_left, color = color.new(color.white, 100),
+                 textcolor = adrColor, size = size.tiny, xloc = xloc.bar_index)
+            lblADRDown := label.new(f_right_anchor(), projDown, "ADR-",
+                 style = label.style_label_left, color = color.new(color.white, 100),
+                 textcolor = adrColor, size = size.tiny, xloc = xloc.bar_index)
+            _adrProjStep := 1
+        else
+            line.set_y1(lnADRUp, projUp)
+            line.set_y2(lnADRUp, projUp)
+            line.set_x2(lnADRUp, f_right_anchor())
+            line.set_color(lnADRUp, adrColor)
+            line.set_y1(lnADRDown, projDown)
+            line.set_y2(lnADRDown, projDown)
+            line.set_x2(lnADRDown, f_right_anchor())
+            line.set_color(lnADRDown, adrColor)
+            if not na(lblADRUp)
+                label.set_xy(lblADRUp, f_right_anchor(), projUp)
+            if not na(lblADRDown)
+                label.set_xy(lblADRDown, f_right_anchor(), projDown)
+            _adrProjStep := 2
+    else
+        if not na(lnADRUp)
+            line.delete(lnADRUp)
+            lnADRUp := na
+        if not na(lnADRDown)
+            line.delete(lnADRDown)
+            lnADRDown := na
+        if not na(lblADRUp)
+            label.delete(lblADRUp)
+            lblADRUp := na
+        if not na(lblADRDown)
+            label.delete(lblADRDown)
+            lblADRDown := na
+
+    // --- Judas levels ---
+    judasOk = showJudas and not na(nyMidOpen)
+    if judasOk
+        judasUp   = nyMidOpen + adrVal / 3
+        judasDown = nyMidOpen - adrVal / 3
+        _adrJudasStep = 0
+        if na(lnJudasUp)
+            lnJudasUp := line.new(bar_index - 1, judasUp, f_right_anchor(), judasUp,
+                 color = adrColor, width = 1, style = line.style_dotted, xloc = xloc.bar_index)
+            lnJudasDown := line.new(bar_index - 1, judasDown, f_right_anchor(), judasDown,
+                 color = adrColor, width = 1, style = line.style_dotted, xloc = xloc.bar_index)
+            lblJudasUp := label.new(f_right_anchor(), judasUp, "Judas+",
+                 style = label.style_label_left, color = color.new(color.white, 100),
+                 textcolor = adrColor, size = size.tiny, xloc = xloc.bar_index)
+            lblJudasDown := label.new(f_right_anchor(), judasDown, "Judas-",
+                 style = label.style_label_left, color = color.new(color.white, 100),
+                 textcolor = adrColor, size = size.tiny, xloc = xloc.bar_index)
+            _adrJudasStep := 1
+        else
+            line.set_y1(lnJudasUp, judasUp)
+            line.set_y2(lnJudasUp, judasUp)
+            line.set_x2(lnJudasUp, f_right_anchor())
+            line.set_color(lnJudasUp, adrColor)
+            line.set_y1(lnJudasDown, judasDown)
+            line.set_y2(lnJudasDown, judasDown)
+            line.set_x2(lnJudasDown, f_right_anchor())
+            line.set_color(lnJudasDown, adrColor)
+            if not na(lblJudasUp)
+                label.set_xy(lblJudasUp, f_right_anchor(), judasUp)
+            if not na(lblJudasDown)
+                label.set_xy(lblJudasDown, f_right_anchor(), judasDown)
+            _adrJudasStep := 2
+    else
+        if not na(lnJudasUp)
+            line.delete(lnJudasUp)
+            lnJudasUp := na
+        if not na(lnJudasDown)
+            line.delete(lnJudasDown)
+            lnJudasDown := na
+        if not na(lblJudasUp)
+            label.delete(lblJudasUp)
+            lblJudasUp := na
+        if not na(lblJudasDown)
+            label.delete(lblJudasDown)
+            lblJudasDown := na
+
+    // --- Consumption % label ---
+    consumText = "ADR " + str.tostring(adrConsumption, "0") + "%"
+    _adrConsumStep = 0
+    if na(lblConsum)
+        lblConsum := label.new(bar_index, dHigh, consumText,
+             style     = label.style_label_left,
+             color     = color.new(color.white, 100),
+             textcolor = adrConsumColor,
+             size      = size.small,
+             xloc      = xloc.bar_index)
+        _adrConsumStep := 1
+    else
+        label.set_xy(lblConsum, bar_index, dHigh)
+        label.set_text(lblConsum, consumText)
+        label.set_textcolor(lblConsum, adrConsumColor)
+        _adrConsumStep := 2
+
+
+//=============================================================================
+// SECTION 12 — SMT DIVERGENCE ENGINE
+//=============================================================================
+// SMT (Smart Money Technique) divergence: when the chart's symbol prints a
+// new swing high/low and a correlated pair fails to confirm, that's a
+// divergence — institutional players moving one but not the other.
+//
+// Default pair mapping:
+//   EUR* → FX:GBPUSD
+//   GBP* → FX:EURUSD
+//   XAU/GOLD → TVC:SILVER
+//   NAS/US100 → SP:SPX
+//   else → user override (smtPairOverride input)
+
+// 12.1 Resolve correlated pair
+smtPair = smtPairOverride != "" ? smtPairOverride : str.contains(syminfo.ticker, "EUR") ? "FX:GBPUSD" : str.contains(syminfo.ticker, "GBP") ? "FX:EURUSD" : (str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.ticker, "GOLD")) ? "TVC:SILVER" : (str.contains(syminfo.ticker, "NAS") or str.contains(syminfo.ticker, "US100")) ? "SP:SPX" : ""
+
+smtEnabled = showSMT and smtPair != ""
+
+// 12.2 Fetch correlated pair (1 security call — total budget now 6/8)
+// We must call request.security unconditionally at script scope. Falling
+// back to chart's own ticker when no pair is determined keeps the call
+// valid; we just don't act on the data.
+effectivePair = smtPair != "" ? smtPair : syminfo.tickerid
+[smtHigh, smtLow] = request.security(effectivePair, timeframe.period, [high, low],
+     lookahead = barmerge.lookahead_off)
+
+// 12.3 Persist correlated pair's value at chart's previous swing pivot
+var float lastSmtHighAtSwg = na
+var float lastSmtLowAtSwg  = na
+
+// 12.4 Per-bar detection (and event flag for Phase 13 alerts)
+smtDivEvent = false
+
+if smtEnabled
+    // ▼ bearish: chart prints HH, correlated does not
+    if not na(swgPivotH)
+        chartHH        = not na(swgStruct.prevPH) and swgPivotH > swgStruct.prevPH
+        smtHighAtPivot = smtHigh[swgRightBars]
+
+        bearishSmt = chartHH and not na(lastSmtHighAtSwg) and not na(smtHighAtPivot) and smtHighAtPivot < lastSmtHighAtSwg
+        if bearishSmt
+            smtDivEvent := true
+            if showSMTLabels
+                label.new(bar_index - swgRightBars, swgPivotH, "SMT ▼",
+                     style     = label.style_label_down,
+                     color     = color.new(color.white, 100),
+                     textcolor = bearSMTColor,
+                     size      = size.small,
+                     xloc      = xloc.bar_index)
+
+        lastSmtHighAtSwg := smtHighAtPivot
+
+    // ▲ bullish: chart prints LL, correlated does not
+    if not na(swgPivotL)
+        chartLL       = not na(swgStruct.prevPL) and swgPivotL < swgStruct.prevPL
+        smtLowAtPivot = smtLow[swgRightBars]
+
+        bullishSmt = chartLL and not na(lastSmtLowAtSwg) and not na(smtLowAtPivot) and smtLowAtPivot > lastSmtLowAtSwg
+        if bullishSmt
+            smtDivEvent := true
+            if showSMTLabels
+                label.new(bar_index - swgRightBars, swgPivotL, "SMT ▲",
+                     style     = label.style_label_up,
+                     color     = color.new(color.white, 100),
+                     textcolor = bullSMTColor,
+                     size      = size.small,
+                     xloc      = xloc.bar_index)
+
+        lastSmtLowAtSwg := smtLowAtPivot
+
+
+//=============================================================================
+// SECTION 13 — DASHBOARD TABLE
+//=============================================================================
+// 3 rows of HTF bias (D / 4H / 1H) + active session name. Bias is
+// computed inline inside request.security via f_dash_bias() — a stripped
+// version of the Phase 3 structure logic that fits a single security call.
+// 4 security calls here → total budget now 10/40 hard limit (PRD-allocated 8/8 + 2 overrun approved).
+
+// 13.1 Simplified swing-bias function (runs in target-TF context)
+f_dash_bias() =>
+    pivotH = ta.pivothigh(5, 5)
+    pivotL = ta.pivotlow(5, 5)
+    var float lastH = na
+    var float lastL = na
+    var int   b     = 0
+    if not na(pivotH)
+        lastH := pivotH
+    if not na(pivotL)
+        lastL := pivotL
+    if not na(lastH) and close > lastH
+        b := 1
+        lastH := na
+    if not na(lastL) and close < lastL
+        b := -1
+        lastL := na
+    b
+
+// 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
+biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
+bias4H = request.security(syminfo.tickerid, "240", f_dash_bias(), lookahead = barmerge.lookahead_off)
+bias1H = request.security(syminfo.tickerid, "60",  f_dash_bias(), lookahead = barmerge.lookahead_off)
+biasW  = request.security(syminfo.tickerid, "W",   f_dash_bias(), lookahead = barmerge.lookahead_off)
+
+// 13.3 Currently active session name
+f_active_session_name() =>
+    asiaState.active ? "Asia" : preLondonState.active ? "Pre-LDN" : londonState.active ? "London" : preNYState.active ? "Pre-NY" : nyOpenState.active ? "NY Open" : nyAMState.active ? "NY AM" : nyLunchState.active ? "Lunch" : nyPMState.active ? "NY PM" : "—"
+
+// 13.4 Resolve position + size strings to constants
+f_dash_pos() =>
+    dashPosition == "Top Left" ? position.top_left : dashPosition == "Bottom Right" ? position.bottom_right : dashPosition == "Bottom Left" ? position.bottom_left : position.top_right
+
+f_dash_size() =>
+    dashSize == "Tiny" ? size.tiny : dashSize == "Normal" ? size.normal : size.small
+
+// 13.5 Bias rendering
+f_bias_arrow(int b) =>
+    b == 1 ? "▲" : b == -1 ? "▼" : "—"
+
+f_bias_arrow_color(int b) =>
+    b == 1 ? bullColor : b == -1 ? bearColor : color.gray
+
+// 13.6 Table state
+var table  dashTable      = na
+var string lastDashPosStr = na
+
+// 13.7 Per-bar dispatch — table itself only updates on the last bar
+if not showDash
+    if not na(dashTable)
+        table.delete(dashTable)
+        dashTable := na
+    lastDashPosStr := na
+else
+    if na(dashTable) or dashPosition != lastDashPosStr
+        if not na(dashTable)
+            table.delete(dashTable)
+        dashTable := table.new(f_dash_pos(), columns = 2, rows = 6,
+             bgcolor      = f_alpha(dashBgColor, 10),
+             border_width = 1,
+             border_color = color.new(#333333, 0))
+        lastDashPosStr := dashPosition
+
+    if barstate.islast
+        sz       = f_dash_size()
+        cellBg   = f_alpha(dashBgColor, 0)
+        textCol  = dashTextColor
+
+        table.cell(dashTable, 0, 0, "TF",      text_color = textCol, text_size = sz, bgcolor = cellBg)
+        table.cell(dashTable, 1, 0, "Bias",    text_color = textCol, text_size = sz, bgcolor = cellBg)
+
+        table.cell(dashTable, 0, 1, "W",       text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 1, f_bias_arrow(biasW),  text_color = f_bias_arrow_color(biasW),  text_size = sz)
+
+        table.cell(dashTable, 0, 2, "D",       text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 2, f_bias_arrow(biasD),  text_color = f_bias_arrow_color(biasD),  text_size = sz)
+
+        table.cell(dashTable, 0, 3, "4H",      text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 3, f_bias_arrow(bias4H), text_color = f_bias_arrow_color(bias4H), text_size = sz)
+
+        table.cell(dashTable, 0, 4, "1H",      text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 4, f_bias_arrow(bias1H), text_color = f_bias_arrow_color(bias1H), text_size = sz)
+
+        table.cell(dashTable, 0, 5, "Session", text_color = textCol, text_size = sz)
+        table.cell(dashTable, 1, 5, f_active_session_name(), text_color = textCol, text_size = sz)
+
+
+//=============================================================================
+// SECTION 13B — LEGEND TABLE
+//=============================================================================
+// Toggleable abbreviation key. Off by default so it doesn't crowd the chart;
+// users flip it on when they're learning the terminology and turn it off
+// once they've internalized the abbreviations. Reuses the dashboard's color
+// inputs (dashBgColor / dashTextColor) so the two tables visually match.
+
+// Single-line chained ternary — Pine v6 errors on multi-line chained ternaries
+// at top-level (CE10156). Same shape as f_dash_pos in Section 13.4.
+f_legend_pos() =>
+    legendPosition == "Top Right" ? position.top_right : legendPosition == "Top Left" ? position.top_left : legendPosition == "Middle Right" ? position.middle_right : legendPosition == "Middle Left" ? position.middle_left : legendPosition == "Bottom Left" ? position.bottom_left : position.bottom_right
+
+f_legend_size() =>
+    legendSize == "Small" ? size.small : legendSize == "Normal" ? size.normal : size.tiny
+
+var table  legendTable      = na
+var string lastLegendPosStr = na
+
+LEGEND_ROWS = 26  // header + 25 abbreviation rows
+
+if not showLegend
+    if not na(legendTable)
+        table.delete(legendTable)
+        legendTable := na
+    lastLegendPosStr := na
+else
+    if na(legendTable) or legendPosition != lastLegendPosStr
+        if not na(legendTable)
+            table.delete(legendTable)
+        legendTable := table.new(f_legend_pos(), columns = 2, rows = LEGEND_ROWS,
+             bgcolor      = f_alpha(dashBgColor, 10),
+             border_width = 1,
+             border_color = color.new(#333333, 0))
+        lastLegendPosStr := legendPosition
+
+    if barstate.islast
+        sz      = f_legend_size()
+        cellBg  = f_alpha(dashBgColor, 0)
+        textCol = dashTextColor
+
+        table.cell(legendTable, 0, 0, "Abbr",    text_color = textCol, text_size = sz, bgcolor = f_alpha(dashBgColor, 0))
+        table.cell(legendTable, 1, 0, "Meaning", text_color = textCol, text_size = sz, bgcolor = f_alpha(dashBgColor, 0))
+
+        // Each row: short label (left) + plain-English expansion (right).
+        // Order roughly groups by module: structure, OBs, FVGs, liquidity,
+        // P/D, key levels, ADR, SMT, CRT, sessions.
+        table.cell(legendTable, 0,  1, "BOS",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  1, "Break of Structure",              text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  2, "CHoCH",   text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  2, "Change of Character",             text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  3, "iBOS",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  3, "Internal Break of Structure",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  4, "iCHoCH",  text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  4, "Internal Change of Character",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  5, "HH/HL",   text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  5, "Higher High / Higher Low",        text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  6, "LH/LL",   text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  6, "Lower High / Lower Low",          text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  7, "OB",      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  7, "Order Block",                     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  8, "BB",      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  8, "Breaker Block",                   text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0,  9, "FVG",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1,  9, "Fair Value Gap",                  text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 10, "iFVG",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 10, "Inverse Fair Value Gap",          text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 11, "CE",      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 11, "Consequent Encroachment",         text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 12, "EQH",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 12, "Equal Highs (liquidity)",         text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 13, "EQL",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 13, "Equal Lows (liquidity)",          text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 14, "IDM",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 14, "Inducement",                      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 15, "EQ",      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 15, "Equilibrium (range 50%)",         text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 16, "Prem",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 16, "Premium zone (above range midpoint)", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 17, "Disc",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 17, "Discount zone (below range midpoint)", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 18, "PDH/PDL", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 18, "Prior Day High / Low",            text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 19, "PWH/PWL", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 19, "Prior Week High / Low",           text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 20, "PMH/PML", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 20, "Prior Month High / Low",          text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 21, "NY Mid",  text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 21, "NY Midnight Open (00:00 EST)",    text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 22, "ADR",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 22, "Average Daily Range",             text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 23, "Judas",   text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 23, "NY-Mid ± ADR/3 trap level",      text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 24, "SMT",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 24, "Smart Money Technique (divergence)", text_color = textCol, text_size = sz)
+        table.cell(legendTable, 0, 25, "CRT",     text_color = textCol, text_size = sz)
+        table.cell(legendTable, 1, 25, "Candle Range Theory",             text_color = textCol, text_size = sz)
+
+
+//=============================================================================
+// SECTION 14 — CANDLE COLORING
+//=============================================================================
+// Two modes (see G_VISUAL inputs):
+//   "Direction" : color by the candle's own close vs open. This is the default —
+//                 it matches what most traders mean by "candle coloring": green
+//                 bullish bars, red bearish bars.
+//   "Structure" : color by the swing-bias state. Every candle in a bullish-bias
+//                 trend tints green; every candle in a bearish-bias trend tints
+//                 red. Useful for trend-at-a-glance, but counter-intuitive
+//                 because individual bearish candles still get the bullish tint.
+candleColorByDir    = close > open ? bullCandleColor : close < open ? bearCandleColor : na
+candleColorByStruct = swgStruct.bias == 1 ? bullCandleColor : swgStruct.bias == -1 ? bearCandleColor : na
+candleColor         = enableCandleColor ? (candleColorMode == "Structure" ? candleColorByStruct : candleColorByDir) : na
+barcolor(candleColor)
+
+
+//=============================================================================
+// SECTION 15 — ALERT CONDITIONS
+//=============================================================================
+// Track previous swing bias so we can classify a break as BOS (continuation
+// or first-direction-establish) vs CHoCH (bias flip).
+var int prevSwgBias = 0
+
+bullBOSEvent   = swgStruct.bullBreakNow and prevSwgBias != -1
+bullCHoCHEvent = swgStruct.bullBreakNow and prevSwgBias == -1
+bearBOSEvent   = swgStruct.bearBreakNow and prevSwgBias !=  1
+bearCHoCHEvent = swgStruct.bearBreakNow and prevSwgBias ==  1
+
+alertcondition(bullBOSEvent,   title="Synvoya: Bullish BOS",     message="Bullish BOS on {{ticker}} {{interval}}")
+alertcondition(bearBOSEvent,   title="Synvoya: Bearish BOS",     message="Bearish BOS on {{ticker}} {{interval}}")
+alertcondition(bullCHoCHEvent, title="Synvoya: Bullish CHoCH",   message="Bullish CHoCH on {{ticker}} {{interval}}")
+alertcondition(bearCHoCHEvent, title="Synvoya: Bearish CHoCH",   message="Bearish CHoCH on {{ticker}} {{interval}}")
+alertcondition(fvgTouchEvent,  title="Synvoya: FVG Touched",     message="FVG touched on {{ticker}} {{interval}}")
+alertcondition(liqSweepEvent,  title="Synvoya: Liquidity Sweep", message="Liquidity swept on {{ticker}} {{interval}}")
+// CRT alert respects the same crtActive gate that controls rendering, so
+// users with htfOnly enabled don't get 1m/5m noise alerts.
+alertcondition(isCRT and crtActive, title="Synvoya: CRT Detected", message="CRT candle on {{ticker}} {{interval}}")
+alertcondition(smtDivEvent,    title="Synvoya: SMT Divergence",  message="SMT divergence on {{ticker}} {{interval}}")
+
+// Capture the post-update bias for the next bar's classification.
+prevSwgBias := swgStruct.bias
+
+
+// ============================================================
+// End of indicator — all 13 modules implemented (sections 3–13B + alerts +
+// candle coloring). See docs/synvoya-confluence-free-prd.md for module specs.
+// ============================================================
