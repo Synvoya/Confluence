@@ -65,15 +65,17 @@ G_VISUAL   = "═══ Visual Settings ═══"
 
 
 // ---- 1.0 Global visual rules ----
-// htfOnly: HIGH-NOISE structure items (HH/HL/LH/LL labels, swing icon
-// markers ▽△, fractal connector lines, CRT) only render on 15m+. On 1m/5m
-// these overlap into an unreadable mess.
+// htfOnly: HIGH-NOISE structure items (HH/HL/LH/LL labels, fractal
+// connector lines, CRT) only render on 15m+. On 1m/5m these overlap into
+// an unreadable mess.
 //
-// LOW-NOISE items always render on all TFs regardless of this toggle:
-// BOS, CHoCH, EQH, EQL, OBs, FVGs, sweeps. Those are discrete events and
-// stay readable even on 1m.
+// Items NOT gated by this toggle (always render on all TFs):
+// - Fractal markers ▽△ (controlled separately by Show Fractal Markers)
+// - BOS, CHoCH labels
+// - EQH, EQL, OBs, FVGs, sweeps
+// All discrete events that stay readable on 1m.
 htfOnly        = input.bool(true,  "Show HH/HL & CRT on 15m+ only", group=G_STRUCT,
-     tooltip="When ON, the noisy items (HH/HL/LH/LL labels, swing markers ▽△, fractal connectors, CRT) only render on 15m / 30m / 1H / 4H / D / W / M. BOS, CHoCH, EQH, EQL, FVGs, and OBs always render on every timeframe.")
+     tooltip="When ON, HH/HL/LH/LL classification labels, fractal connector lines, and CRT only render on 15m+. Fractal markers ▽△, BOS, CHoCH, EQH, EQL, FVGs, and OBs always render on every timeframe.")
 rightExtBars   = input.int(5, "Line Right Extension (bars)",
      minval=0, maxval=50, group=G_VISUAL, display=display.none,
      tooltip="How many bars past the last candle horizontal levels (key levels, EQH/EQL, IDM, EQ, ADR, Judas, CRT) extend to. 0 = stop exactly at the last bar.")
@@ -85,7 +87,12 @@ showInternal    = input.bool(true,  "Show Internal Structure",   group=G_STRUCT)
 showSwing       = input.bool(true,  "Show Swing Structure",      group=G_STRUCT)
 showBOS         = input.bool(true,  "Show BOS Labels",           group=G_STRUCT)
 showCHoCH       = input.bool(true,  "Show CHoCH Labels",         group=G_STRUCT)
-showSwingPoints = input.bool(true,  "Show Swing Points",         group=G_STRUCT)
+showSwingPoints = input.bool(true,  "Show Fractal Markers (▽△)", group=G_STRUCT,
+     tooltip="Williams-Fractal-style triangle markers at every swing pivot. Always rendered on all timeframes (independent of the 15m+ HTF gate). Default ON.")
+fractalBullColor = input.color(#26A69A, "Fractal Bull Color (△)", group=G_STRUCT,
+     tooltip="Color of the △ markers below swing lows. Defaults to teal — distinct from BOS/CHoCH bull color so fractals stand out as a separate visual layer.")
+fractalBearColor = input.color(#EF5350, "Fractal Bear Color (▽)", group=G_STRUCT,
+     tooltip="Color of the ▽ markers above swing highs. Defaults to coral — distinct from BOS/CHoCH bear color so fractals stand out as a separate visual layer.")
 // HH/HL/LH/LL classification text — separate from the triangle markers and
 // default OFF so the chart looks like the standard Williams Fractals indicator
 // (clean red ▽ above highs, green △ below lows). Turn ON when you want the
@@ -873,27 +880,28 @@ f_update_structure(swgStruct, swgPivotH, swgPivotL, swgRightBars, false, false, 
 f_update_structure(intStruct, intPivotH, intPivotL, intRightBars, true,
                    swgStruct.bullBreakNow, swgStruct.bearBreakNow)
 
-// 4.8 Fractal markers — proper Williams Fractal appearance via plotshape.
-// plotshape(shape.triangledown/up) renders a solid filled triangle icon,
-// identical to TradingView's built-in Williams Fractals indicator.
-// offset=-rightBars places the shape back at the confirmed pivot bar.
-// Swing layer = size.small; internal layer = size.tiny (visually subordinate).
-// All four are gated by showSwingPoints so one toggle controls all markers.
-plotshape(showStructure and showSwing    and showSwingPoints and htfPass and not na(swgPivotH),
+// 4.8 Fractal markers — Williams-Fractal-style triangles via plotshape.
+// All four render on every TF (NO htfPass gate) so traders can see swing
+// pivots on 1m / 5m as well — the visual cost is small because plotshape
+// produces tiny solid triangles, not labels. Sized size.tiny everywhere
+// to keep the chart clean even on dense lower-TF charts.
+// Colors are dedicated inputs (fractalBullColor / fractalBearColor) so
+// fractals can be visually distinct from BOS/CHoCH structure colors.
+plotshape(showStructure and showSwing    and showSwingPoints and not na(swgPivotH),
           style=shape.triangledown, location=location.abovebar,
-          offset=-swgRightBars, color=bearColor, size=size.small,
+          offset=-swgRightBars, color=fractalBearColor, size=size.tiny,
           title="Swing High Fractal",    display=display.pane)
-plotshape(showStructure and showSwing    and showSwingPoints and htfPass and not na(swgPivotL),
+plotshape(showStructure and showSwing    and showSwingPoints and not na(swgPivotL),
           style=shape.triangleup,   location=location.belowbar,
-          offset=-swgRightBars, color=bullColor, size=size.small,
+          offset=-swgRightBars, color=fractalBullColor, size=size.tiny,
           title="Swing Low Fractal",     display=display.pane)
-plotshape(showStructure and showInternal and showSwingPoints and htfPass and not na(intPivotH),
+plotshape(showStructure and showInternal and showSwingPoints and not na(intPivotH),
           style=shape.triangledown, location=location.abovebar,
-          offset=-intRightBars, color=bearColor, size=size.tiny,
+          offset=-intRightBars, color=fractalBearColor, size=size.tiny,
           title="Internal High Fractal", display=display.pane)
-plotshape(showStructure and showInternal and showSwingPoints and htfPass and not na(intPivotL),
+plotshape(showStructure and showInternal and showSwingPoints and not na(intPivotL),
           style=shape.triangleup,   location=location.belowbar,
-          offset=-intRightBars, color=bullColor, size=size.tiny,
+          offset=-intRightBars, color=fractalBullColor, size=size.tiny,
           title="Internal Low Fractal",  display=display.pane)
 
 
