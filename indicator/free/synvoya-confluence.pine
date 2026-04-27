@@ -284,6 +284,13 @@ dashEmaFast   = input.int(9,  "EMA Fast (Bias)", minval=2, maxval=50,  group=G_D
      tooltip="Fast EMA period for the dashboard's EMA bias column. Default 9 (SMC convention). EMA9 above EMA21 = bullish, below = bearish.")
 dashEmaSlow   = input.int(21, "EMA Slow (Bias)", minval=3, maxval=200, group=G_DASH,
      tooltip="Slow EMA period for the dashboard's EMA bias column. Default 21. Pair with the Fast input — common alternates: 10/20, 5/13, 8/21.")
+// EMA-on-chart plotting — render the same EMAs used for the bias column
+// as lines on the chart. Off by default. When ON, traders see exactly
+// what the bias dashboard is computing.
+showEMALines  = input.bool(false, "Show EMA Lines on Chart", group=G_DASH,
+     tooltip="Plots the same fast/slow EMAs used for the dashboard EMA bias column directly on the chart. Useful for traders who want to see the EMA cross visually rather than just the bias arrow.")
+emaFastColor  = input.color(#00BCD4, "EMA Fast Line Color", group=G_DASH)
+emaSlowColor  = input.color(#FF9800, "EMA Slow Line Color", group=G_DASH)
 dashBgColor   = input.color(#1E1E1E, "Table BG Color",   group=G_DASH)
 dashTextColor = input.color(#FFFFFF, "Table Text Color", group=G_DASH)
 
@@ -2458,6 +2465,19 @@ candleColorByDir    = close > open ? bullCandleColor : close < open ? bearCandle
 candleColorByStruct = swgStruct.bias == 1 ? bullCandleColor : swgStruct.bias == -1 ? bearCandleColor : na
 candleColor         = enableCandleColor ? (candleColorMode == "Structure" ? candleColorByStruct : candleColorByDir) : na
 barcolor(candleColor)
+
+
+//=============================================================================
+// SECTION 14B — EMA LINES ON CHART (optional)
+//=============================================================================
+// Plots the same fast/slow EMAs used by the dashboard EMA bias column.
+// Off by default — opt-in for traders who want to see the cross visually.
+// Periods come from dashEmaFast / dashEmaSlow (Dashboard input group), so
+// changing those inputs updates both the bias column AND the plotted lines.
+emaFastChart = ta.ema(close, dashEmaFast)
+emaSlowChart = ta.ema(close, dashEmaSlow)
+plot(showEMALines ? emaFastChart : na, color = emaFastColor, linewidth = 2, title = "EMA Fast (Bias)")
+plot(showEMALines ? emaSlowChart : na, color = emaSlowColor, linewidth = 2, title = "EMA Slow (Bias)")
 
 
 //=============================================================================

@@ -8,7 +8,8 @@
 
 | Module | What It Does | Included |
 |---|---|---|
-| **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). Williams Fractal-style swing markers (▽△) on every TF with dedicated color inputs. HH/HL/LH/LL classification labels. Connector lines between pivots. | ✅ |
+| **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). HH/HL/LH/LL classification labels. Connector lines between pivots. | ✅ |
+| **Fractal Markers** | Williams-Fractal-style swing markers (▽△) on every TF (no HTF gate). Dedicated bull/bear color inputs — distinct from BOS/CHoCH structure colors. | ✅ |
 | **Order Blocks** | Bullish & bearish OBs with mitigation tracking. Auto-converts mitigated OBs into Breaker Blocks. | ✅ |
 | **Fair Value Gaps** | Full FVG lifecycle — Active → Partial → Mitigated → Inverted (iFVG). CE midline (50% of gap). ATR-auto threshold. | ✅ |
 | **Liquidity Levels** | Equal Highs / Equal Lows detection (ATR-adaptive). Sweep labels. Inducement (IDM) markers. | ✅ |
@@ -22,6 +23,7 @@
 | **ADR (Average Daily Range)** | 14-day ADR with live consumption % label. Judas swing levels (NY Midnight ± ADR/3). Optional projection lines. | ✅ |
 | **SMT Divergence** | Auto-detects correlated pair: EU↔GU, XAU↔XAG, NAS↔SPX. Labels divergence at swing points. | ✅ |
 | **Multi-TF Dashboard** | Dual-bias confluence table: W/D/4H/1H × Struct (5/5 pivot BOS) + EMA (9/21 cross, configurable). Live session name (wall-clock based, not bar-time). Live NY Time clock. | ✅ |
+| **EMA Trend Lines** | Optional plot of the same fast/slow EMAs used for the dashboard EMA bias column. Visible on chart as two lines — see the cross visually, not just the dashboard arrow. Default OFF. | ✅ |
 | **Legend** | Toggleable 25-row abbreviation key — explains every acronym on the chart. | ✅ |
 | **Candle Coloring** | Direction mode (default) or structure-bias mode. | ✅ |
 | **Alerts** | 8 conditions: Bullish BOS, Bearish BOS, Bullish CHoCH, Bearish CHoCH, FVG Touch, Liquidity Sweep, CRT Formation, SMT Divergence. | ✅ |
