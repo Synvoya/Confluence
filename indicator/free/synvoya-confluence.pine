@@ -295,8 +295,19 @@ bearCandleColor   = input.color(#F44336, "Bearish Candle Color", group=G_VISUAL)
 // Every session/macro check in this indicator uses America/New_York time
 // so broker timezone differences and DST transitions are auto-handled.
 // Never read raw hour(time) / minute(time) anywhere else in the file.
+//
+// Bar-time variants (use `time` = bar's open timestamp). Drive session-box
+// rendering — each bar gets its session via its own open time.
 f_ny_hour()   => hour(time, "America/New_York")
 f_ny_minute() => minute(time, "America/New_York")
+
+// Wall-clock variants (use `timenow` = live real-world time). Drive the
+// dashboard's "Session" label and NY-clock row. On HTF charts (4H, D),
+// the live wall-clock can be hours into a bar that opened in a different
+// session — without these, the dashboard would show the bar-open session
+// instead of what's actually happening right now.
+f_ny_hour_now()   => hour(timenow, "America/New_York")
+f_ny_minute_now() => minute(timenow, "America/New_York")
 
 
 // ---- Session window check ----
@@ -305,6 +316,13 @@ f_ny_minute() => minute(time, "America/New_York")
 // by switching to OR semantics when start > end.
 f_is_in_session(startH, startM, endH, endM) =>
     cur = f_ny_hour() * 60 + f_ny_minute()
+    s   = startH * 60 + startM
+    e   = endH   * 60 + endM
+    s > e ? (cur >= s or cur < e) : (cur >= s and cur < e)
+
+// Wall-clock version — same logic but evaluated against live time.
+f_is_in_session_now(startH, startM, endH, endM) =>
+    cur = f_ny_hour_now() * 60 + f_ny_minute_now()
     s   = startH * 60 + startM
     e   = endH   * 60 + endM
     s > e ? (cur >= s or cur < e) : (cur >= s and cur < e)
@@ -2170,9 +2188,15 @@ bias4H = request.security(syminfo.tickerid, "240", f_dash_bias(), lookahead = ba
 bias1H = request.security(syminfo.tickerid, "60",  f_dash_bias(), lookahead = barmerge.lookahead_off)
 biasW  = request.security(syminfo.tickerid, "W",   f_dash_bias(), lookahead = barmerge.lookahead_off)
 
-// 13.3 Currently active session name
+// 13.3 Currently active session name — uses LIVE wall-clock NY time
+// (timenow), not the bar's open time. On HTF charts (4H, D), the bar
+// can open at e.g. 00:00 NY but real-time is now 02:30 NY (London) —
+// using timenow gives the trader the actually-happening session, which
+// is what the dashboard is for. Asia uses (19,0,0,0) for 19:00→00:00
+// midnight crossing; f_is_in_session_now handles s>e by switching to
+// OR semantics so it returns true for any time >= 19:00 NY.
 f_active_session_name() =>
-    asiaState.active ? "Asia" : preLondonState.active ? "Pre-LDN" : londonState.active ? "London" : preNYState.active ? "Pre-NY" : nyOpenState.active ? "NY Open" : nyAMState.active ? "NY AM" : nyLunchState.active ? "Lunch" : nyPMState.active ? "NY PM" : "—"
+    f_is_in_session_now(19, 0, 0, 0) ? "Asia" : f_is_in_session_now(1, 0, 2, 0) ? "Pre-LDN" : f_is_in_session_now(2, 0, 5, 0) ? "London" : f_is_in_session_now(6, 0, 7, 0) ? "Pre-NY" : f_is_in_session_now(7, 0, 10, 0) ? "NY Open" : f_is_in_session_now(10, 0, 12, 0) ? "NY AM" : f_is_in_session_now(12, 0, 13, 30) ? "Lunch" : f_is_in_session_now(13, 30, 16, 0) ? "NY PM" : "—"
 
 // 13.4 Resolve position + size strings to constants
 f_dash_pos() =>
@@ -2231,11 +2255,12 @@ else
         table.cell(dashTable, 0, 5, "Session", text_color = textCol, text_size = sz)
         table.cell(dashTable, 1, 5, f_active_session_name(), text_color = textCol, text_size = sz)
 
-        // NY clock — verifies the indicator's internal NY time matches the
-        // actual NY clock. If this disagrees with NY wall time, the timezone
+        // NY clock — uses timenow (live wall-clock) so on HTF charts it
+        // shows the actual current NY time, not the bar's open time.
+        // If this disagrees with the real NY wall clock, the timezone
         // string isn't resolving correctly on the user's broker feed.
-        nyH = f_ny_hour()
-        nyM = f_ny_minute()
+        nyH = f_ny_hour_now()
+        nyM = f_ny_minute_now()
         nyTimeStr = (nyH < 10 ? "0" : "") + str.tostring(nyH) + ":" + (nyM < 10 ? "0" : "") + str.tostring(nyM)
         table.cell(dashTable, 0, 6, "NY",      text_color = textCol, text_size = sz)
         table.cell(dashTable, 1, 6, nyTimeStr, text_color = textCol, text_size = sz)
