@@ -8,7 +8,7 @@
 
 | Module | What It Does | Included |
 |---|---|---|
-| **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). Williams Fractal-style swing markers (▽△). HH/HL/LH/LL classification labels. Connector lines between pivots. | ✅ |
+| **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). Williams Fractal-style swing markers (▽△) on every TF with dedicated color inputs. HH/HL/LH/LL classification labels. Connector lines between pivots. | ✅ |
 | **Order Blocks** | Bullish & bearish OBs with mitigation tracking. Auto-converts mitigated OBs into Breaker Blocks. | ✅ |
 | **Fair Value Gaps** | Full FVG lifecycle — Active → Partial → Mitigated → Inverted (iFVG). CE midline (50% of gap). ATR-auto threshold. | ✅ |
 | **Liquidity Levels** | Equal Highs / Equal Lows detection (ATR-adaptive). Sweep labels. Inducement (IDM) markers. | ✅ |
