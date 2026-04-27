@@ -13,13 +13,15 @@
 | **Fair Value Gaps** | Full FVG lifecycle — Active → Partial → Mitigated → Inverted (iFVG). CE midline (50% of gap). ATR-auto threshold. | ✅ |
 | **Liquidity Levels** | Equal Highs / Equal Lows detection (ATR-adaptive). Sweep labels. Inducement (IDM) markers. | ✅ |
 | **Premium / Discount** | Real-time zone shading with equilibrium line and live "72% Prem / 28% Disc" readout. | ✅ |
-| **Sessions & Killzones** | Asia, Pre-London, London, Pre-NY, NY Open, NY AM, Lunch, NY PM. Silver Bullet windows (3). 8 ICT macro times. Auto-DST via NY timezone. | ✅ |
+| **Market Sessions** | Asia, Pre-London, London, Pre-NY, NY (combined or split into NY Open / NY AM / Lunch / NY PM). Uses actual market hours (London open 03:00 NY = 08:00 BST/GMT, NYSE open 09:30 NY). Auto-DST via NY timezone. | ✅ |
+| **ICT Killzones** | Optional opt-in feature for ICT traders. Asia (20:00–00:00 NY), London Open (02:00–05:00), NY AM (07:00–10:00), NY PM (13:30–16:00). Toggleable separately from sessions. | ✅ |
+| **Silver Bullet & Macros** | 3 Silver Bullet windows + 8 ICT macro times. | ✅ |
 | **Asia H/L Extension** | Dashed H/L lines extending past Asia session close — key reference for NY Open direction bias. | ✅ |
 | **Key Levels** | PDH/PDL, PWH/PWL, PMH/PML, Monday H/L, NY Midnight Open. All bounded with right-side labels. | ✅ |
 | **CRT (Candle Range Theory)** | Detects CRT candles on 15m+ timeframes. Auto-extending H/L reference lines that freeze on touch. | ✅ |
 | **ADR (Average Daily Range)** | 14-day ADR with live consumption % label. Judas swing levels (NY Midnight ± ADR/3). Optional projection lines. | ✅ |
 | **SMT Divergence** | Auto-detects correlated pair: EU↔GU, XAU↔XAG, NAS↔SPX. Labels divergence at swing points. | ✅ |
-| **Multi-TF Dashboard** | Bias table: Weekly / Daily / 4H / 1H direction (▲/▼/—) + active session name. | ✅ |
+| **Multi-TF Dashboard** | Dual-bias confluence table: W/D/4H/1H × Struct (5/5 pivot BOS) + EMA (9/21 cross, configurable). Live session name (wall-clock based, not bar-time). Live NY Time clock. | ✅ |
 | **Legend** | Toggleable 25-row abbreviation key — explains every acronym on the chart. | ✅ |
 | **Candle Coloring** | Direction mode (default) or structure-bias mode. | ✅ |
 | **Alerts** | 8 conditions: Bullish BOS, Bearish BOS, Bullish CHoCH, Bearish CHoCH, FVG Touch, Liquidity Sweep, CRT Formation, SMT Divergence. | ✅ |
@@ -80,13 +82,40 @@ Sessions and macros use `America/New_York` timezone internally — correct acros
 
 ---
 
+## Dashboard — Reading the Confluence
+
+The dashboard shows **two bias signals per timeframe**, side-by-side:
+
+| TF  | Str | EMA |
+|-----|:---:|:---:|
+| W   |  ▲  |  ▲  |
+| D   |  ▲  |  ▼  |
+| 4H  |  ▲  |  ▼  |
+| 1H  |  ▼  |  ▼  |
+| Session | London |   |
+| NY Time | 03:39  |   |
+
+- **Str** — 5/5 pivot BOS detection. Same logic as the chart's market structure module. Sticky — flips only on real structural breaks.
+- **EMA** — EMA cross (default 9/21, configurable in Settings). Faster trend filter — flips within 3-5 bars of a real reversal.
+
+**How to read:**
+- **Both ▲** = high-confidence bullish
+- **Both ▼** = high-confidence bearish
+- **Str ▲ + EMA ▼** = pullback within bullish structure (potential entry zone)
+- **Str ▼ + EMA ▲** = bear structure breaking, recovery starting
+
+**Session and NY Time** rows use live wall-clock (not bar-open time) — reflect what's actually happening NOW, not what session the current HTF bar opened in.
+
+---
+
 ## Technical
 
 - **Language:** Pine Script v6
 - **Type:** Overlay indicator, single file
 - **Draw object limits:** 500 lines / 500 boxes / 500 labels (declared at indicator level)
-- **Security calls:** 9 (well within TradingView's 40-call limit)
+- **Security calls:** 9 (well within TradingView's 40-call limit) — dashboard biases bundled into 4 tuple calls (one per TF returning [Struct, EMA])
 - **Timeframe gate:** High-noise items (HH/HL labels, fractal connectors, CRT) suppressed below 15m to prevent chart clutter
+- **All times:** NY-localized (`America/New_York`) — auto-DST, broker-timezone independent
 
 ---
 
