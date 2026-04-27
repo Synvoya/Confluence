@@ -87,7 +87,7 @@ showInternal    = input.bool(true,  "Show Internal Structure",   group=G_STRUCT)
 showSwing       = input.bool(true,  "Show Swing Structure",      group=G_STRUCT)
 showBOS         = input.bool(true,  "Show BOS Labels",           group=G_STRUCT)
 showCHoCH       = input.bool(true,  "Show CHoCH Labels",         group=G_STRUCT)
-showSwingPoints = input.bool(true,  "Show Fractal Markers (▽△)", group=G_STRUCT,
+showSwingPoints = input.bool(true,  "Show Swing Points (Fractal Markers ▽△)", group=G_STRUCT,
      tooltip="Williams-Fractal-style triangle markers at every swing pivot. Always rendered on all timeframes (independent of the 15m+ HTF gate). Default ON.")
 fractalBullColor = input.color(#26A69A, "Fractal Bull Color (△)", group=G_STRUCT,
      tooltip="Color of the △ markers below swing lows. Defaults to teal — distinct from BOS/CHoCH bull color so fractals stand out as a separate visual layer.")
