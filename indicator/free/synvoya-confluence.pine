@@ -2231,11 +2231,19 @@ if smtEnabled
 //   Sticky — flips only on real structural breaks. SMC-pure.
 //   Same logic as the chart's market structure module.
 //
-// f_dash_bias_ema — EMA CROSSOVER (default 9/21, user-configurable)
-//   SMC-convention intraday trend filter. EMA9 > EMA21 → bullish.
-//   Periods configurable via "EMA Fast (Bias)" / "EMA Slow (Bias)"
-//   inputs in the Dashboard group. Common alternates: 10/20 (classic),
-//   5/13 (Fibonacci), 8/21 (Elder).
+// f_dash_bias_ema — PRICE vs EMAs (default 9/21, user-configurable)
+//   Bullish when close is above BOTH EMAs (price + faster trend agreeing).
+//   Bearish when close is below BOTH EMAs.
+//   Neutral (—) when price is sandwiched between EMAs — honest signal of
+//   "no clear bias", instead of reporting stale cross direction during
+//   transitions. Periods configurable via "EMA Fast (Bias)" / "EMA Slow
+//   (Bias)" inputs in the Dashboard group. Common alternates: 10/20
+//   (classic), 5/13 (Fibonacci), 8/21 (Elder).
+//
+// Earlier iteration used pure EMA9/21 cross — that lagged real reversals
+// because the cross only flips after price has been below the fast EMA
+// for many bars. Switched to "price vs both EMAs" so the bias matches
+// what traders see when price clearly breaks the trend lines.
 //
 // When Struct says ▲ but EMA says ▼, that's "pullback within bullish
 // structure" — useful confluence read, NOT a contradiction. Two
@@ -2264,7 +2272,13 @@ f_dash_bias_struct() =>
 f_dash_bias_ema() =>
     emaFast = ta.ema(close, dashEmaFast)
     emaSlow = ta.ema(close, dashEmaSlow)
-    emaFast > emaSlow ? 1 : emaFast < emaSlow ? -1 : 0
+    // Bullish: close above BOTH EMAs (strong trend up — price + cross both confirming)
+    // Bearish: close below BOTH EMAs (strong trend down — price + cross both confirming)
+    // Mixed:   close sandwiched between EMAs — neutral (—). Honest signal of
+    //          "no clear bias right now" rather than reporting stale cross direction.
+    bullish = close > emaFast and close > emaSlow
+    bearish = close < emaFast and close < emaSlow
+    bullish ? 1 : bearish ? -1 : 0
 
 // 13.2 HTF bias via security — tuple returns BOTH metrics per call.
 [biasW_s,  biasW_e]  = request.security(syminfo.tickerid, "W",   [f_dash_bias_struct(), f_dash_bias_ema()], lookahead = barmerge.lookahead_off)
