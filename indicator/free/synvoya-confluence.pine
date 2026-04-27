@@ -271,6 +271,12 @@ dashPosition  = input.string("Top Right", "Table Position",
      options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=G_DASH, display=display.none)
 dashSize      = input.string("Small", "Table Size",
      options=["Tiny", "Small", "Normal"], group=G_DASH, display=display.none)
+// EMA periods for the EMA-cross bias column. 9/21 is the SMC intraday
+// convention — adjust if you prefer 10/20, 5/13, 8/21, etc.
+dashEmaFast   = input.int(9,  "EMA Fast (Bias)", minval=2, maxval=50,  group=G_DASH,
+     tooltip="Fast EMA period for the dashboard's EMA bias column. Default 9 (SMC convention). EMA9 above EMA21 = bullish, below = bearish.")
+dashEmaSlow   = input.int(21, "EMA Slow (Bias)", minval=3, maxval=200, group=G_DASH,
+     tooltip="Slow EMA period for the dashboard's EMA bias column. Default 21. Pair with the Fast input — common alternates: 10/20, 5/13, 8/21.")
 dashBgColor   = input.color(#1E1E1E, "Table BG Color",   group=G_DASH)
 dashTextColor = input.color(#FFFFFF, "Table Text Color", group=G_DASH)
 
@@ -2204,12 +2210,15 @@ if smtEnabled
 //   Sticky — flips only on real structural breaks. SMC-pure.
 //   Same logic as the chart's market structure module.
 //
-// f_dash_bias_ema — EMA CROSSOVER (EMA5 vs EMA13)
-//   Fibonacci-paired fast trend filter. EMA5 > EMA13 → bullish.
-//   Catches real reversals within 3-5 bars per TF — fast enough to
-//   reflect what traders see, smoothed enough to ignore single-bar noise.
-//   (Earlier EMA10/20 lagged too much on charts in long uptrends with
-//   recent reversals; EMA5/13 fixes that without becoming chop-sensitive.)
+// f_dash_bias_ema — EMA CROSSOVER (default 9/21, user-configurable)
+//   SMC-convention intraday trend filter. EMA9 > EMA21 → bullish.
+//   Periods configurable via "EMA Fast (Bias)" / "EMA Slow (Bias)"
+//   inputs in the Dashboard group. Common alternates: 10/20 (classic),
+//   5/13 (Fibonacci), 8/21 (Elder).
+//
+// When Struct says ▲ but EMA says ▼, that's "pullback within bullish
+// structure" — useful confluence read, NOT a contradiction. Two
+// metrics measuring different things give complementary info.
 //
 // Both run in target-TF context via a single tuple request.security per
 // TF (one call returns [struct, ema]). Security budget stays at 4.
@@ -2232,8 +2241,8 @@ f_dash_bias_struct() =>
     b
 
 f_dash_bias_ema() =>
-    emaFast = ta.ema(close, 5)
-    emaSlow = ta.ema(close, 13)
+    emaFast = ta.ema(close, dashEmaFast)
+    emaSlow = ta.ema(close, dashEmaSlow)
     emaFast > emaSlow ? 1 : emaFast < emaSlow ? -1 : 0
 
 // 13.2 HTF bias via security — tuple returns BOTH metrics per call.
@@ -2290,10 +2299,10 @@ else
         cellBg   = f_alpha(dashBgColor, 0)
         textCol  = dashTextColor
 
-        // Header — 3 columns: TF | Struct (5/5 BOS) | EMA (5/13 cross)
-        table.cell(dashTable, 0, 0, "TF",     text_color = textCol, text_size = sz, bgcolor = cellBg)
-        table.cell(dashTable, 1, 0, "Struct", text_color = textCol, text_size = sz, bgcolor = cellBg)
-        table.cell(dashTable, 2, 0, "EMA",    text_color = textCol, text_size = sz, bgcolor = cellBg)
+        // Header — 3 columns: TF | Str (5/5 pivot BOS) | EMA (user-configurable cross)
+        table.cell(dashTable, 0, 0, "TF",  text_color = textCol, text_size = sz, bgcolor = cellBg)
+        table.cell(dashTable, 1, 0, "Str", text_color = textCol, text_size = sz, bgcolor = cellBg)
+        table.cell(dashTable, 2, 0, "EMA", text_color = textCol, text_size = sz, bgcolor = cellBg)
 
         // 4 HTF bias rows — both metrics per row for confluence
         table.cell(dashTable, 0, 1, "W", text_color = textCol, text_size = sz)
