@@ -2163,24 +2163,18 @@ if smtEnabled
 // EMA20 vs EMA50 crossover, runs cleanly in a security call.
 // 4 security calls here → total budget 10/40 hard limit.
 
-// 13.1 Bias function — multi-factor confirmation (runs in target-TF context)
-// Requires THREE-way agreement to call a directional bias:
-//   bullish: EMA20 > EMA50  AND  close > EMA50  AND  EMA20 rising
-//   bearish: EMA20 < EMA50  AND  close < EMA50  AND  EMA20 falling
-//   else:    neutral (—)
-// Mixed states (e.g. EMA20 > EMA50 but price has pulled below EMA50, or
-// EMA20 still above EMA50 but rolling over) report neutral rather than
-// stale bullish — accurately reflecting what traders see on the chart.
-// Replaces the original 5/5-pivot heuristic that flipped bullish on every
-// minor swing high, producing false ▲ on clearly bearish HTF charts.
+// 13.1 Bias function — close vs EMA20 (runs in target-TF context)
+// Simple, responsive, matches what traders see on the chart:
+//   close > EMA20 → bullish (▲)
+//   close < EMA20 → bearish (▼)
+// EMA20 reacts to pullbacks within 5-6 bars per TF, so a clean bearish
+// move on the chart pulls close below EMA20 fast and the bias flips.
+// Earlier attempts (5/5-pivot heuristic, then EMA20/50 multi-factor)
+// were too sticky on charts in long-term uptrends with recent pullbacks
+// — produced false ▲ on clearly bearish HTF action.
 f_dash_bias() =>
     ema20 = ta.ema(close, 20)
-    ema50 = ta.ema(close, 50)
-    ema20Rising  = ema20 > ema20[3]
-    ema20Falling = ema20 < ema20[3]
-    bullish = ema20 > ema50 and close > ema50 and ema20Rising
-    bearish = ema20 < ema50 and close < ema50 and ema20Falling
-    bullish ? 1 : bearish ? -1 : 0
+    close > ema20 ? 1 : close < ema20 ? -1 : 0
 
 // 13.2 HTF bias via security (4 calls: W / D / 4H / 1H)
 biasD  = request.security(syminfo.tickerid, "D",   f_dash_bias(), lookahead = barmerge.lookahead_off)
