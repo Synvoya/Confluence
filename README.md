@@ -1,32 +1,30 @@
 # Synvoya Confluence (SMC)
 
-> The most comprehensive free SMC/ICT indicator for TradingView. One indicator replaces ten.
+> The most comprehensive free SMC/ICT indicator for TradingView. **15 tools. One indicator. Zero clutter.**
 
 ---
 
 ## Features
 
-| Module | What It Does | Included |
-|---|---|---|
-| **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). HH/HL/LH/LL classification labels. Connector lines between pivots. | ✅ |
-| **Fractal Markers** | Williams-Fractal-style swing markers (▽△) on every TF (no HTF gate). Dedicated bull/bear color inputs — distinct from BOS/CHoCH structure colors. | ✅ |
-| **Order Blocks** | Bullish & bearish OBs with mitigation tracking. Auto-converts mitigated OBs into Breaker Blocks. | ✅ |
-| **Fair Value Gaps** | Full FVG lifecycle — Active → Partial → Mitigated → Inverted (iFVG). CE midline (50% of gap). ATR-auto threshold. | ✅ |
-| **Liquidity Levels** | Equal Highs / Equal Lows detection (ATR-adaptive). Sweep labels. Inducement (IDM) markers. | ✅ |
-| **Premium / Discount** | Real-time zone shading with equilibrium line and live "72% Prem / 28% Disc" readout. | ✅ |
-| **Market Sessions** | Asia, Pre-London, London, Pre-NY, NY (combined or split into NY Open / NY AM / Lunch / NY PM). Uses actual market hours (London open 03:00 NY = 08:00 BST/GMT, NYSE open 09:30 NY). Auto-DST via NY timezone. | ✅ |
-| **ICT Killzones** | Optional opt-in feature for ICT traders. Asia (20:00–00:00 NY), London Open (02:00–05:00), NY AM (07:00–10:00), NY PM (13:30–16:00). Toggleable separately from sessions. | ✅ |
-| **Silver Bullet & Macros** | 3 Silver Bullet windows + 8 ICT macro times. | ✅ |
-| **Asia H/L Extension** | Dashed H/L lines extending past Asia session close — key reference for NY Open direction bias. | ✅ |
-| **Key Levels** | PDH/PDL, PWH/PWL, PMH/PML, Monday H/L, NY Midnight Open. All bounded with right-side labels. | ✅ |
-| **CRT (Candle Range Theory)** | Detects CRT candles on 15m+ timeframes. Auto-extending H/L reference lines that freeze on touch. | ✅ |
-| **ADR (Average Daily Range)** | 14-day ADR with live consumption % label. Judas swing levels (NY Midnight ± ADR/3). Optional projection lines. | ✅ |
-| **SMT Divergence** | Auto-detects correlated pair: EU↔GU, XAU↔XAG, NAS↔SPX. Labels divergence at swing points. | ✅ |
-| **Multi-TF Dashboard** | Dual-bias confluence table: W/D/4H/1H × Struct (5/5 pivot BOS) + EMA (9/21 cross, configurable). Live session name (wall-clock based, not bar-time). Live NY Time clock. | ✅ |
-| **EMA Trend Lines** | Optional plot of the same fast/slow EMAs used for the dashboard EMA bias column. Visible on chart as two lines — see the cross visually, not just the dashboard arrow. Default OFF. | ✅ |
-| **Legend** | Toggleable 25-row abbreviation key — explains every acronym on the chart. | ✅ |
-| **Candle Coloring** | Direction mode (default) or structure-bias mode. | ✅ |
-| **Alerts** | 8 conditions: Bullish BOS, Bearish BOS, Bullish CHoCH, Bearish CHoCH, FVG Touch, Liquidity Sweep, CRT Formation, SMT Divergence. | ✅ |
+| # | Module | What It Does |
+|:---:|---|---|
+| 1 | **Market Structure** | Dual-layer BOS/CHoCH (Internal + Swing). HH/HL/LH/LL classification labels. Connector lines between pivots. |
+| 2 | **Fractal Markers** | Williams-Fractal-style swing markers (▲▼) on every TF (no HTF gate). Dedicated bull/bear color inputs — distinct from BOS/CHoCH structure colors. |
+| 3 | **Order Blocks + Breakers** | Bullish & bearish OBs with mitigation tracking. Auto-converts mitigated OBs into Breaker Blocks. |
+| 4 | **Fair Value Gaps + iFVG** | Full FVG lifecycle — Active → Partial → Mitigated → Inverted (iFVG). CE midline (50% of gap). ATR-auto threshold. |
+| 5 | **Liquidity (EQH/EQL/IDM/Sweeps)** | Equal Highs / Equal Lows detection (ATR-adaptive). Sweep labels. Inducement (IDM) markers. |
+| 6 | **Premium / Discount Zones** | Real-time zone shading with equilibrium line and live "72% Prem / 28% Disc" readout. |
+| 7 | **Sessions & Killzones** | Market sessions (Asia / Pre-London / London / Pre-NY / NY incl. NY Open / NY AM / Lunch / NY PM) at actual market hours. Optional ICT Killzones overlay. 3 Silver Bullet windows + 8 ICT macro times. Auto-DST via NY timezone. |
+| 8 | **Asia H/L Extension** | Dashed H/L lines extending past Asia session close — key reference for NY Open direction bias. |
+| 9 | **Key Levels** | PDH/PDL, PWH/PWL, PMH/PML, Monday H/L, NY Midnight Open. All bounded with right-side labels. |
+| 10 | **CRT (Candle Range Theory)** | Detects CRT candles on 15m+ timeframes. Auto-extending H/L reference lines that freeze on touch. |
+| 11 | **ADR + Judas** | 14-day ADR with live consumption % label. Judas swing levels (NY Midnight ± ADR/3). Optional projection lines. |
+| 12 | **SMT Divergence** | Auto-detects correlated pair: EU↔GU, XAU↔XAG, NAS↔SPX. Labels divergence at swing points. |
+| 13 | **Multi-TF Dashboard** | Dual-bias confluence table: W/D/4H/1H × Struct (5/5 pivot BOS) + EMA (price vs both EMAs, periods configurable, default 9/21). Live session name (wall-clock) + live NY Time clock. |
+| 14 | **EMA Trend Lines** | Optional plot of the same fast/slow EMAs used for the dashboard EMA bias column. See the EMAs visually, not just the dashboard arrow. Default OFF. |
+| 15 | **Smart Alerts** | 8 conditions: Bullish BOS, Bearish BOS, Bullish CHoCH, Bearish CHoCH, FVG Touch, Liquidity Sweep, CRT Formation, SMT Divergence. |
+
+Plus: **Legend** (toggleable abbreviation key) and **Candle Coloring** (direction or structure-bias modes) — bundled visual helpers, not counted as separate modules.
 
 ---
 
